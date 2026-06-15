@@ -1,6 +1,6 @@
 package com.antifrod.scoring.model
 
-data class RecalculateResponse(
+data class ecalculateResponse(
     val datasetId: String,
     val status: String
 )
