@@ -1,4 +1,4 @@
-<h1 align="center">Fraud & Abuse Detection System</h1>
+<p align="center"> <img src="/home/ernest/Anti-Frod-Detector/frontend/src/assets/brand/anti-fraud-logo-full.png" alt="Fraud & Abuse Detection System Logo" width="200"/> </p>
 
 <p align="center">
   A B2B platform for e-commerce companies that detects suspicious refund approvals by analyzing order history, return requests, and customer support decisions.
