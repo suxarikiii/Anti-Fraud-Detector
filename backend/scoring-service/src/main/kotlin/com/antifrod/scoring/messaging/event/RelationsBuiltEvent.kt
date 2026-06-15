@@ -1,8 +1,8 @@
 package com.antifrod.scoring.messaging.event
 
-data class RelationsBuiltEvent (
+data class RelationsBuiltEvent(
     val datasetId: String,
-    val jobId: String,
-    val usersCount: Int,
-    val featuresCount: Int
+    val jobId: String? = null,
+    val relationsCount: Int = 0,
+    val publishedAt: String? = null
 )

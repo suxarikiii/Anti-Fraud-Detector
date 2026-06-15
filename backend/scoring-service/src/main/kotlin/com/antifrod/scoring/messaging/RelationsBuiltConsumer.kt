@@ -4,16 +4,18 @@ import com.antifrod.scoring.messaging.event.PipelineFailedEvent
 import com.antifrod.scoring.messaging.event.RelationsBuiltEvent
 import com.antifrod.scoring.messaging.event.ScoringCompletedEvent
 import com.antifrod.scoring.service.ScoringService
+import org.springframework.amqp.rabbit.annotation.RabbitListener
 import org.springframework.stereotype.Component
 import java.time.Instant
 
 @Component
-class RelationsBuiltConsumer (
+class RelationsBuiltConsumer(
     private val scoringService: ScoringService,
     private val scoringEventPublisher: ScoringEventPublisher
-){
+) {
+
     @RabbitListener(queues = ["scoring.relations-built.queue"])
-    fun handleRelationBuilt(event: RelationsBuiltEvent){
+    fun handleRelationsBuilt(event: RelationsBuiltEvent) {
         try {
             val result = scoringService.processRelationsBuilt(event.datasetId)
 
@@ -21,8 +23,8 @@ class RelationsBuiltConsumer (
                 ScoringCompletedEvent(
                     datasetId = event.datasetId,
                     jobId = event.jobId,
-                    scoredUsersCount = event.usersCount,
-                    suspiciousUsersCount = result.suspiciousUsersCount,
+                    scoredApprovalsCount = result.suspiciousApprovalsCount,
+                    suspiciousApprovalsCount = result.suspiciousApprovalsCount,
                     publishedAt = Instant.now()
                 )
             )
