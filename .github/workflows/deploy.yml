@@ -1,0 +1,101 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: docker.io
+  IMAGE_PREFIX: ${{ secrets.DOCKERHUB_USERNAME }}/anti-fraud
+
+jobs:
+
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: upload-service
+            context: backend/upload-service
+          - service: relations-service
+            context: backend/relations-service
+          - service: scoring-service
+            context: backend/scoring-service
+          - service: frontend
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VM
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "docker-compose.yml,backend/gateway/nginx.conf,.env.example"
+          target: ~/anti-fraud
+
+      - name: Deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ~/anti-fraud
+
+            # use .env or fall back to example
+            [ -f .env ] || cp .env.example .env
+
+            export IMAGE_TAG=${{ github.sha }}
+            export IMAGE_PREFIX=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}
+
+            # override compose to use registry images
+            cat > docker-compose.override.yml << EOF
+            services:
+              upload-service:
+                image: ${IMAGE_PREFIX}-upload-service:${IMAGE_TAG}
+                build: !reset null
+              relations-service:
+                image: ${IMAGE_PREFIX}-relations-service:${IMAGE_TAG}
+                build: !reset null
+              scoring-service:
+                image: ${IMAGE_PREFIX}-scoring-service:${IMAGE_TAG}
+                build: !reset null
+              frontend:
+                image: ${IMAGE_PREFIX}-frontend:${IMAGE_TAG}
+                build: !reset null
+            EOF
+
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker image prune -f
