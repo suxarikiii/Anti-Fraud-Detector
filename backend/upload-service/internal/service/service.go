@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"upload-service/internal/domain"
 	"upload-service/internal/repository"
 	"upload-service/pkg/rabbitmq"
 
@@ -41,19 +42,38 @@ func NewService(repo *repository.Repository, minioClient *minio.Client, bucket s
 	return &Service{repo: repo, minio: minioClient, bucket: bucket, publisher: publisher, logger: logger}
 }
 
-func (s *Service) UploadDataset(ctx context.Context, file io.Reader, size int64, originalFilename string) (uuid.UUID, error) {
+func (s *Service) UploadDataset(ctx context.Context, file io.Reader, size int64, originalFilename string) (uuid.UUID, uuid.UUID, error) {
 	datasetID := uuid.New()
 	objectName := fmt.Sprintf("datasets/%s.csv", datasetID.String())
 	if _, err := s.minio.PutObject(ctx, s.bucket, objectName, file, size, minio.PutObjectOptions{ContentType: "text/csv"}); err != nil {
-		return uuid.Nil, fmt.Errorf("upload to minio: %w", err)
+		return uuid.Nil, uuid.Nil, fmt.Errorf("upload to minio: %w", err)
 	}
 
 	now := time.Now().UTC()
 	if err := s.repo.CreateDatasetWithFile(ctx, datasetID, originalFilename, originalFilename, "UPLOADED", objectName, "csv", now, now); err != nil {
-		return uuid.Nil, fmt.Errorf("create dataset records: %w", err)
+		return uuid.Nil, uuid.Nil, fmt.Errorf("create dataset records: %w", err)
 	}
 
-	return datasetID, nil
+	// create analysis job immediately after upload
+	jobID := uuid.New()
+	if err := s.repo.CreateAnalysisJob(ctx, jobID, datasetID, "UPLOADED", "UPLOADED", now, now); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("create analysis job: %w", err)
+	}
+
+	// publish dataset.uploaded event
+	event := datasetUploadedEvent{
+		DatasetID:  datasetID.String(),
+		JobID:      jobID.String(),
+		FilePath:   objectName,
+		FileType:   "csv",
+		UploadedAt: now.UTC().Format(time.RFC3339),
+	}
+
+	if err := s.publisher.Publish(ctx, "dataset.uploaded", event); err != nil {
+		s.logger.Error("failed to publish dataset.uploaded", "error", err)
+	}
+
+	return datasetID, jobID, nil
 }
 
 func (s *Service) PreviewDataset(ctx context.Context, datasetID uuid.UUID) (*PreviewResponse, error) {
@@ -117,7 +137,7 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 	return jobID, nil
 }
 
-func (s *Service) GetAnalysisStatus(ctx context.Context, jobID uuid.UUID) (*repository.AnalysisJob, error) {
+func (s *Service) GetAnalysisStatus(ctx context.Context, jobID uuid.UUID) (*domain.AnalysisJob, error) {
 	job, err := s.repo.GetAnalysisJobByID(ctx, jobID)
 	if err != nil {
 		return nil, err

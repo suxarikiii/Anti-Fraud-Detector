@@ -29,10 +29,12 @@ type response struct {
 	DatasetID string      `json:"datasetId,omitempty"`
 	JobID     string      `json:"jobId,omitempty"`
 	Data      interface{} `json:"data,omitempty"`
+	Filename  string      `json:"filename,omitempty"`
+	Status    string      `json:"status,omitempty"`
 }
 
 func (h *Handler) HealthHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, response{Message: "ok"})
+	writeJSON(w, http.StatusOK, response{Data: map[string]string{"status": "UP", "service": "upload-service"}})
 }
 
 func (h *Handler) UploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -49,14 +51,14 @@ func (h *Handler) UploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	datasetID, err := h.Service.UploadDataset(r.Context(), bytes.NewReader(buffer), int64(len(buffer)), header.Filename)
+	datasetID, jobID, err := h.Service.UploadDataset(r.Context(), bytes.NewReader(buffer), int64(len(buffer)), header.Filename)
 	if err != nil {
 		h.Logger.Error("upload service error", "error", err)
 		writeError(w, http.StatusInternalServerError, "upload error: %v", err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, response{DatasetID: datasetID.String()})
+	writeJSON(w, http.StatusCreated, response{DatasetID: datasetID.String(), JobID: jobID.String(), Filename: header.Filename, Status: "UPLOADED"})
 }
 
 func (h *Handler) PreviewHandler(w http.ResponseWriter, r *http.Request) {

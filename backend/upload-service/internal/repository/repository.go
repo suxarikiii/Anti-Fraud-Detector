@@ -6,28 +6,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"upload-service/internal/domain"
 )
 
 type Repository struct {
 	db *sql.DB
-}
-
-type UploadedFile struct {
-	ID         uuid.UUID
-	DatasetID  uuid.UUID
-	FilePath   string
-	FileType   string
-	UploadedAt time.Time
-}
-
-type AnalysisJob struct {
-	ID          uuid.UUID `json:"id"`
-	DatasetID   uuid.UUID `json:"datasetId"`
-	Status      string    `json:"status"`
-	CurrentStep string    `json:"currentStep"`
-	Error       string    `json:"errorMessage,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 func NewRepository(db *sql.DB) *Repository {
@@ -70,13 +54,13 @@ func (r *Repository) CreateDatasetWithFile(ctx context.Context, datasetID uuid.U
 	return tx.Commit()
 }
 
-func (r *Repository) GetUploadedFileByDatasetID(ctx context.Context, datasetID uuid.UUID) (*UploadedFile, error) {
+func (r *Repository) GetUploadedFileByDatasetID(ctx context.Context, datasetID uuid.UUID) (*domain.UploadedFile, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, dataset_id, file_path, file_type, uploaded_at FROM uploaded_files WHERE dataset_id = $1 ORDER BY uploaded_at DESC LIMIT 1`,
 		datasetID,
 	)
 
-	var file UploadedFile
+	var file domain.UploadedFile
 	if err := row.Scan(&file.ID, &file.DatasetID, &file.FilePath, &file.FileType, &file.UploadedAt); err != nil {
 		return nil, err
 	}
@@ -98,13 +82,13 @@ func (r *Repository) CreateAnalysisJob(ctx context.Context, jobID, datasetID uui
 	return err
 }
 
-func (r *Repository) GetAnalysisJobByID(ctx context.Context, jobID uuid.UUID) (*AnalysisJob, error) {
+func (r *Repository) GetAnalysisJobByID(ctx context.Context, jobID uuid.UUID) (*domain.AnalysisJob, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, dataset_id, status, current_step, error_message, created_at, updated_at FROM analysis_jobs WHERE id = $1`,
 		jobID,
 	)
 
-	var job AnalysisJob
+	var job domain.AnalysisJob
 	if err := row.Scan(&job.ID, &job.DatasetID, &job.Status, &job.CurrentStep, &job.Error, &job.CreatedAt, &job.UpdatedAt); err != nil {
 		return nil, err
 	}

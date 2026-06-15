@@ -1,0 +1,133 @@
+openapi: 3.0.1
+info:
+  title: Upload Service API
+  version: "1.0.0"
+  description: API for dataset upload, preview and analysis control
+servers:
+  - url: http://localhost:8081
+paths:
+  /api/datasets/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: service health
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+
+  /api/datasets/upload:
+    post:
+      summary: Upload CSV dataset
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: upload accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  datasetId:
+                    type: string
+                  jobId:
+                    type: string
+                  filename:
+                    type: string
+                  status:
+                    type: string
+
+  /api/datasets/{datasetId}/preview:
+    get:
+      summary: Preview uploaded dataset
+      parameters:
+        - name: datasetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  headers:
+                    type: array
+                    items:
+                      type: string
+                  rows:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: string
+
+  /api/analysis/{datasetId}/start:
+    post:
+      summary: Start analysis for dataset
+      parameters:
+        - name: datasetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: job created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId:
+                    type: string
+
+  /api/analysis/{jobId}/status:
+    get:
+      summary: Get analysis job status
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: job status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  datasetId:
+                    type: string
+                  status:
+                    type: string
+                  currentStep:
+                    type: string
+                  errorMessage:
+                    type: string
+                  createdAt:
+                    type: string
+                  updatedAt:
+                    type: string

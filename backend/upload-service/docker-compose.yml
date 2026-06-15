@@ -32,6 +32,13 @@ services:
     volumes:
       - minio_data:/data
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui:4
+    environment:
+      - SWAGGER_JSON=http://localhost:8081/api/docs/openapi.yaml
+    network_mode: host
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   minio_data:
