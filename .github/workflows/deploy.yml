@@ -49,53 +49,18 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy to VM
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Copy compose file
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "docker-compose.yml,backend/gateway/nginx.conf,.env.example"
-          target: ~/anti-fraud
-
-      - name: Deploy
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
+      name: Deploy
+      needs: build-and-push
+      runs-on: self-hosted
+      steps:
+        - uses: actions/checkout@v4
+        - name: Deploy
+          run: |
+            mkdir -p ~/anti-fraud/backend/gateway
+            cp docker-compose.yml .env.example ~/anti-fraud/
+            cp backend/gateway/nginx.conf ~/anti-fraud/backend/gateway/
             cd ~/anti-fraud
-
-            # use .env or fall back to example
             [ -f .env ] || cp .env.example .env
-
-            export IMAGE_TAG=${{ github.sha }}
-            export IMAGE_PREFIX=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}
-
-            # override compose to use registry images
-            cat > docker-compose.override.yml << EOF
-            services:
-              upload-service:
-                image: ${IMAGE_PREFIX}-upload-service:${IMAGE_TAG}
-                build: !reset null
-              relations-service:
-                image: ${IMAGE_PREFIX}-relations-service:${IMAGE_TAG}
-                build: !reset null
-              scoring-service:
-                image: ${IMAGE_PREFIX}-scoring-service:${IMAGE_TAG}
-                build: !reset null
-              frontend:
-                image: ${IMAGE_PREFIX}-frontend:${IMAGE_TAG}
-                build: !reset null
-            EOF
-
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
