@@ -52,6 +52,7 @@ services:
   # ── Backend Services ──────────────────────────────────
 
   upload-service:
+    image: ${IMAGE_PREFIX:-ammmiii/anti-fraud}-upload-service:${IMAGE_TAG:-latest}
     build:
       context: ./backend/upload-service
     environment:
@@ -77,6 +78,7 @@ services:
     restart: unless-stopped
 
   relations-service:
+    image: ${IMAGE_PREFIX:-ammmiii/anti-fraud}-relations-service:${IMAGE_TAG:-latest}
     build:
       context: ./backend/relations-service
     environment:
@@ -89,6 +91,7 @@ services:
     restart: unless-stopped
 
   scoring-service:
+    image: ${IMAGE_PREFIX:-ammmiii/anti-fraud}-scoring-service:${IMAGE_TAG:-latest}
     build:
       context: ./backend/scoring-service
     environment:
@@ -119,6 +122,7 @@ services:
   # ── Frontend ──────────────────────────────────────────
 
   frontend:
+    image: ${IMAGE_PREFIX:-ammmiii/anti-fraud}-frontend:${IMAGE_TAG:-latest}
     build:
       context: ./frontend
     ports:
