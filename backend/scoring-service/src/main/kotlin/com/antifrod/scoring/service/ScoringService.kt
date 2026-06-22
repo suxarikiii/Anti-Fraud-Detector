@@ -2,6 +2,7 @@ package com.antifrod.scoring.service
 
 import com.antifrod.scoring.model.AgentRiskSummary
 import com.antifrod.scoring.model.RecalculateResponse
+import com.antifrod.scoring.model.RefundApprovalDetailsResponse
 import com.antifrod.scoring.model.RefundApprovalFeatures
 import com.antifrod.scoring.model.RefundApprovalRecord
 import com.antifrod.scoring.model.RefundApprovalRiskScore
@@ -106,6 +107,39 @@ class ScoringService(
 
         return ScoringProcessingResult(
             suspiciousApprovalsCount = suspiciousApprovals.size
+        )
+    }
+
+    fun getReturnDetails(datasetId: String, returnId: String): RefundApprovalDetailsResponse {
+        val records = refundDatasetRepository.findByDatasetId(datasetId)
+
+        val record = records.firstOrNull { it.returnId == returnId }
+            ?: error("Return approval was not found: $returnId in dataset: $datasetId")
+
+        val risk = buildRiskScore(datasetId, record, records)
+
+        return RefundApprovalDetailsResponse(
+            returnId = record.returnId,
+            orderId = record.orderId,
+            customerId = record.customerId,
+            supportAgentId = record.supportAgentId,
+            datasetId = datasetId,
+
+            orderAmount = record.orderAmount,
+            refundAmount = record.refundAmount,
+            productCategory = record.productCategory,
+            returnReason = record.returnReason,
+            evidenceProvided = record.evidenceProvided,
+            decision = record.decision,
+            manualOverride = record.manualOverride,
+            decisionTimeMinutes = record.decisionTimeMinutes,
+            timestamp = record.timestamp,
+
+            riskScore = risk.riskScore,
+            riskLevel = risk.riskLevel,
+            topReason = risk.topReason,
+            reasons = risk.reasons,
+            calculatedAt = risk.calculatedAt
         )
     }
 

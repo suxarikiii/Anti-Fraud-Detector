@@ -2,6 +2,7 @@ package com.antifrod.scoring.controller
 
 import com.antifrod.scoring.model.AgentRiskSummary
 import com.antifrod.scoring.model.RecalculateResponse
+import com.antifrod.scoring.model.RefundApprovalDetailsResponse
 import com.antifrod.scoring.model.RefundApprovalRiskScore
 import com.antifrod.scoring.model.SuspiciousRefundApproval
 import com.antifrod.scoring.service.ScoringService
@@ -36,6 +37,14 @@ class ScoringController(
         @PathVariable agentId: String
     ): AgentRiskSummary {
         return scoringService.getAgentRiskSummary(agentId)
+    }
+
+    @GetMapping("/datasets/{datasetId}/returns/{returnId}/details")
+    fun getReturnDetails(
+        @PathVariable datasetId: String,
+        @PathVariable returnId: String
+    ): RefundApprovalDetailsResponse {
+        return scoringService.getReturnDetails(datasetId, returnId)
     }
 
     @PostMapping("/datasets/{datasetId}/recalculate")
