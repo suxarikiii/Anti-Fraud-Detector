@@ -32,11 +32,27 @@ class ScoringController(
         return scoringService.getReturnRisk(returnId)
     }
 
+    @GetMapping("/datasets/{datasetId}/returns/{returnId}/risk")
+    fun getReturnRiskByDataset(
+        @PathVariable datasetId: String,
+        @PathVariable returnId: String
+    ): RefundApprovalRiskScore {
+        return scoringService.getReturnRisk(datasetId, returnId)
+    }
+
     @GetMapping("/agents/{agentId}/risk-summary")
     fun getAgentRiskSummary(
         @PathVariable agentId: String
     ): AgentRiskSummary {
         return scoringService.getAgentRiskSummary(agentId)
+    }
+
+    @GetMapping("/datasets/{datasetId}/agents/{agentId}/risk-summary")
+    fun getAgentRiskSummaryByDataset(
+        @PathVariable datasetId: String,
+        @PathVariable agentId: String
+    ): AgentRiskSummary {
+        return scoringService.getAgentRiskSummary(datasetId, agentId)
     }
 
     @GetMapping("/datasets/{datasetId}/returns/{returnId}/details")

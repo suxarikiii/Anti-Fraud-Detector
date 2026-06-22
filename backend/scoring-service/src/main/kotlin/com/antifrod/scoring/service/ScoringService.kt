@@ -45,17 +45,24 @@ class ScoringService(
     }
 
     fun getReturnRisk(returnId: String): RefundApprovalRiskScore {
-        val records = refundDatasetRepository.findAll()
+        return getReturnRisk("demo", returnId)
+    }
 
-        val record = refundDatasetRepository.findByReturnId(returnId)
-            ?: error("Return approval was not found: $returnId")
+    fun getReturnRisk(datasetId: String, returnId: String): RefundApprovalRiskScore {
+        val records = refundDatasetRepository.findByDatasetId(datasetId)
 
-        // Надо сделать на week 3
-        return buildRiskScore("demo", record, records)
+        val record = records.firstOrNull { it.returnId == returnId }
+            ?: error("Return approval was not found: $returnId in dataset: $datasetId")
+
+        return buildRiskScore(datasetId, record, records)
     }
 
     fun getAgentRiskSummary(agentId: String): AgentRiskSummary {
-        val records = refundDatasetRepository.findAll()
+        return getAgentRiskSummary("demo", agentId)
+    }
+
+    fun getAgentRiskSummary(datasetId: String, agentId: String): AgentRiskSummary {
+        val records = refundDatasetRepository.findByDatasetId(datasetId)
         val agentRecords = records.filter { it.supportAgentId == agentId }
 
         if (agentRecords.isEmpty()) {
@@ -69,7 +76,7 @@ class ScoringService(
             )
         }
 
-        val riskScores = agentRecords.map { record -> buildRiskScore("demo", record, records) }
+        val riskScores = agentRecords.map { record -> buildRiskScore(datasetId, record, records) }
         val suspiciousScores = riskScores.filter { it.riskScore >= 31 }
 
         val topReason = suspiciousScores
@@ -298,4 +305,3 @@ class ScoringService(
         }
     }
 }
-

@@ -55,6 +55,15 @@ class ScoringServiceTest {
     }
 
     @Test
+    fun `should preserve dataset id in dataset aware return risk response`() {
+        val risk = scoringService.getReturnRisk("demo", "return_3041")
+
+        assertEquals("demo", risk.datasetId)
+        assertEquals("return_3041", risk.returnId)
+        assertEquals(RiskLevel.CRITICAL, risk.riskLevel)
+    }
+
+    @Test
     fun `should return risk summary for support agent`() {
         val summary = scoringService.getAgentRiskSummary("agent_777")
 
@@ -62,6 +71,15 @@ class ScoringServiceTest {
         assertTrue(summary.suspiciousApprovalsCount > 0)
         assertTrue(summary.averageRiskScore > 0.0)
         assertTrue(summary.topReason.isNotBlank())
+    }
+
+    @Test
+    fun `should return dataset aware agent risk summary`() {
+        val summary = scoringService.getAgentRiskSummary("demo", "agent_777")
+
+        assertEquals("agent_777", summary.agentId)
+        assertTrue(summary.suspiciousApprovalsCount > 0)
+        assertTrue(summary.averageRiskScore > 0.0)
     }
 
     @Test

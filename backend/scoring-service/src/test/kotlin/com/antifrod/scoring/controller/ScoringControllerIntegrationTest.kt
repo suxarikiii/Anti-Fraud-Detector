@@ -64,6 +64,16 @@ class ScoringControllerIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `should return dataset aware return risk through HTTP endpoint`() {
+        mockMvc.perform(get("/api/scoring/datasets/demo/returns/return_3041/risk"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.returnId").value("return_3041"))
+            .andExpect(jsonPath("$.datasetId").value("demo"))
+            .andExpect(jsonPath("$.riskScore").value(100))
+            .andExpect(jsonPath("$.riskLevel").value("CRITICAL"))
+    }
+
+    @Test
     fun `should return refund approval details with risk data through HTTP endpoint`() {
         mockMvc.perform(get("/api/scoring/datasets/demo/returns/return_3041/details"))
             .andExpect(status().isOk)
@@ -96,5 +106,14 @@ class ScoringControllerIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.highRiskApprovalsCount").value(1))
             .andExpect(jsonPath("$.criticalRiskApprovalsCount").value(1))
             .andExpect(jsonPath("$.topReason").value("Support agent has unusually high approval rate"))
+    }
+
+    @Test
+    fun `should return dataset aware support agent risk summary through HTTP endpoint`() {
+        mockMvc.perform(get("/api/scoring/datasets/demo/agents/agent_777/risk-summary"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.agentId").value("agent_777"))
+            .andExpect(jsonPath("$.suspiciousApprovalsCount").value(4))
+            .andExpect(jsonPath("$.averageRiskScore").value(59.0))
     }
 }

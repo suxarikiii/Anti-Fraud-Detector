@@ -13,7 +13,7 @@ class RabbitMqConfig {
     companion object {
         const val PIPELINE_EXCHANGE = "pipeline.exchange"
         const val REFUND_RELATIONS_BUILT_QUEUE = "scoring.refund-relations-built.queue"
-        const val REFUND_RELATIONS_BUILT_ROUTING_KEY = "refund.routing.key"
+        const val REFUND_RELATIONS_BUILT_ROUTING_KEY = "refund.relations.built"
     }
 
     @Bean

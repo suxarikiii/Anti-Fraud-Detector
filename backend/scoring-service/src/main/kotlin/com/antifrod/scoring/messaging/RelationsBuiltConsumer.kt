@@ -1,5 +1,6 @@
 package com.antifrod.scoring.messaging
 
+import com.antifrod.scoring.config.RabbitMqConfig
 import com.antifrod.scoring.messaging.event.PipelineFailedEvent
 import com.antifrod.scoring.messaging.event.RelationsBuiltEvent
 import com.antifrod.scoring.messaging.event.ScoringCompletedEvent
@@ -14,7 +15,7 @@ class RelationsBuiltConsumer(
     private val scoringEventPublisher: ScoringEventPublisher
 ) {
 
-    @RabbitListener(queues = ["scoring.relations-built.queue"])
+    @RabbitListener(queues = [RabbitMqConfig.REFUND_RELATIONS_BUILT_QUEUE])
     fun handleRelationsBuilt(event: RelationsBuiltEvent) {
         try {
             val result = scoringService.processRelationsBuilt(event.datasetId)
@@ -25,7 +26,7 @@ class RelationsBuiltConsumer(
                     jobId = event.jobId,
                     scoredApprovalsCount = result.suspiciousApprovalsCount,
                     suspiciousApprovalsCount = result.suspiciousApprovalsCount,
-                    publishedAt = Instant.now()
+                    timestamp = Instant.now()
                 )
             )
         } catch (exception: Exception) {
@@ -33,9 +34,9 @@ class RelationsBuiltConsumer(
                 PipelineFailedEvent(
                     datasetId = event.datasetId,
                     jobId = event.jobId,
-                    failedStage = "SCORING",
-                    message = exception.message ?: "Unknown scoring error",
-                    publishedAt = Instant.now()
+                    failedStep = "SCORING",
+                    errorMessage = exception.message ?: "Unknown scoring error",
+                    timestamp = Instant.now()
                 )
             )
         }

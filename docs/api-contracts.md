@@ -60,11 +60,11 @@ Example return risk response:
 ```json
 {
   "returnId": "return_3041",
-  "orderId": "order_9281",
-  "customerId": "customer_512",
-  "supportAgentId": "agent_777",
+  "orderId": "order_1041",
+  "customerId": "customer_999",
+  "supportAgentId": "agent_999",
   "datasetId": "demo",
-  "riskScore": 85,
+  "riskScore": 100,
   "riskLevel": "CRITICAL",
   "topReason": "Refund was approved without required evidence",
   "reasons": [
@@ -74,9 +74,9 @@ Example return risk response:
       "scoreImpact": 25
     },
     {
-      "type": "FAST_APPROVAL",
-      "message": "Refund was approved very quickly",
-      "scoreImpact": 15
+      "type": "MANUAL_OVERRIDE",
+      "message": "Manual override was used for this refund approval",
+      "scoreImpact": 20
     }
   ],
   "calculatedAt": "2026-06-01T10:15:00Z"
@@ -88,20 +88,20 @@ Example return details response:
 ```json
 {
   "returnId": "return_3041",
-  "orderId": "order_9281",
-  "customerId": "customer_512",
-  "supportAgentId": "agent_777",
+  "orderId": "order_1041",
+  "customerId": "customer_999",
+  "supportAgentId": "agent_999",
   "datasetId": "demo",
-  "orderAmount": 299.99,
-  "refundAmount": 289.99,
+  "orderAmount": 1168.27,
+  "refundAmount": 1019.25,
   "productCategory": "electronics",
-  "returnReason": "Item not as described",
+  "returnReason": "item_not_as_described",
   "evidenceProvided": false,
   "decision": "APPROVED",
   "manualOverride": true,
-  "decisionTimeMinutes": 2,
-  "timestamp": "2026-06-01T10:08:00Z",
-  "riskScore": 85,
+  "decisionTimeMinutes": 4,
+  "timestamp": "2026-06-17T09:01:00Z",
+  "riskScore": 100,
   "riskLevel": "CRITICAL",
   "topReason": "Refund was approved without required evidence",
   "reasons": [
@@ -119,6 +119,26 @@ Example return details response:
       "type": "MANUAL_OVERRIDE",
       "message": "Manual override was used for this refund approval",
       "scoreImpact": 20
+    },
+    {
+      "type": "AGENT_HIGH_APPROVAL_RATE",
+      "message": "Support agent has unusually high approval rate",
+      "scoreImpact": 30
+    },
+    {
+      "type": "CUSTOMER_FREQUENT_RETURNS",
+      "message": "Customer has frequent refund requests",
+      "scoreImpact": 20
+    },
+    {
+      "type": "REPEATED_AGENT_CUSTOMER_PAIR",
+      "message": "Same support agent repeatedly approved refunds for this customer",
+      "scoreImpact": 25
+    },
+    {
+      "type": "SUSPICIOUS_CLUSTER",
+      "message": "Refund approval belongs to a suspicious relation cluster",
+      "scoreImpact": 25
     }
   ],
   "calculatedAt": "2026-06-01T10:15:00Z"
@@ -130,10 +150,10 @@ Example agent risk summary response:
 ```json
 {
   "agentId": "agent_777",
-  "suspiciousApprovalsCount": 14,
-  "averageRiskScore": 63.4,
-  "highRiskApprovalsCount": 5,
-  "criticalRiskApprovalsCount": 2,
+  "suspiciousApprovalsCount": 4,
+  "averageRiskScore": 59.0,
+  "highRiskApprovalsCount": 1,
+  "criticalRiskApprovalsCount": 1,
   "topReason": "Support agent has unusually high approval rate"
 }
 ```

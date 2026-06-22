@@ -97,7 +97,7 @@ flowchart TD
     R --> V
     T --> V
     U --> V
-````
+```
 
 ---
 
@@ -110,7 +110,9 @@ An analyst opens a high-risk refund approval and sees that the refund was approv
 ```bash
 curl http://localhost:8083/api/scoring/health
 curl http://localhost:8083/api/scoring/datasets/demo/suspicious-approvals
+curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/risk
 curl http://localhost:8083/api/scoring/returns/return_3041/risk
 curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/details
+curl http://localhost:8083/api/scoring/datasets/demo/agents/agent_777/risk-summary
 curl http://localhost:8083/api/scoring/agents/agent_777/risk-summary
 ```
