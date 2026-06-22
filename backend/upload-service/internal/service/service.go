@@ -3,6 +3,7 @@ package service
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -60,19 +61,6 @@ func (s *Service) UploadDataset(ctx context.Context, file io.Reader, size int64,
 		return uuid.Nil, uuid.Nil, fmt.Errorf("create analysis job: %w", err)
 	}
 
-	// publish dataset.uploaded event
-	event := datasetUploadedEvent{
-		DatasetID:  datasetID.String(),
-		JobID:      jobID.String(),
-		FilePath:   objectName,
-		FileType:   "csv",
-		UploadedAt: now.UTC().Format(time.RFC3339),
-	}
-
-	if err := s.publisher.Publish(ctx, "dataset.uploaded", event); err != nil {
-		s.logger.Error("failed to publish dataset.uploaded", "error", err)
-	}
-
 	return datasetID, jobID, nil
 }
 
@@ -116,15 +104,32 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 		return uuid.Nil, err
 	}
 
-	jobID := uuid.New()
 	now := time.Now().UTC()
-	if err := s.repo.CreateAnalysisJob(ctx, jobID, datasetID, "UPLOADED", "UPLOADED", now, now); err != nil {
-		return uuid.Nil, fmt.Errorf("create analysis job: %w", err)
+
+	job, err := s.repo.GetLatestAnalysisJobByDatasetID(ctx, datasetID)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			return uuid.Nil, fmt.Errorf("get analysis job: %w", err)
+		}
+
+		jobID := uuid.New()
+		if err := s.repo.CreateAnalysisJob(ctx, jobID, datasetID, "UPLOADED", "UPLOADED", now, now); err != nil {
+			return uuid.Nil, fmt.Errorf("create analysis job: %w", err)
+		}
+
+		job, err = s.repo.GetAnalysisJobByID(ctx, jobID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("load analysis job: %w", err)
+		}
+	}
+
+	if job.Status != "UPLOADED" {
+		return job.ID, nil
 	}
 
 	event := datasetUploadedEvent{
 		DatasetID:  datasetID.String(),
-		JobID:      jobID.String(),
+		JobID:      job.ID.String(),
 		FilePath:   uploadedFile.FilePath,
 		FileType:   uploadedFile.FileType,
 		UploadedAt: uploadedFile.UploadedAt.UTC().Format(time.RFC3339),
@@ -134,7 +139,11 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 		return uuid.Nil, fmt.Errorf("publish event: %w", err)
 	}
 
-	return jobID, nil
+	if err := s.repo.UpdateAnalysisStatus(ctx, job.ID, "NORMALIZING", "NORMALIZING", now); err != nil {
+		return uuid.Nil, fmt.Errorf("update analysis status: %w", err)
+	}
+
+	return job.ID, nil
 }
 
 func (s *Service) GetAnalysisStatus(ctx context.Context, jobID uuid.UUID) (*domain.AnalysisJob, error) {

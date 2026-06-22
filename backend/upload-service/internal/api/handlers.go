@@ -34,7 +34,7 @@ type response struct {
 }
 
 func (h *Handler) HealthHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, response{Data: map[string]string{"status": "UP", "service": "upload-service"}})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "UP", "service": "upload-service"})
 }
 
 func (h *Handler) UploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +76,7 @@ func (h *Handler) PreviewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, response{Data: preview})
+	writeJSON(w, http.StatusOK, preview)
 }
 
 func (h *Handler) StartAnalysisHandler(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +112,7 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, response{Data: status})
+	writeJSON(w, http.StatusOK, status)
 }
 
 func readFile(file multipart.File) ([]byte, error) {
