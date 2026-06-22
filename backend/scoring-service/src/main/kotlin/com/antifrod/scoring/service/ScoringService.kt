@@ -21,7 +21,7 @@ class ScoringService(
         val records = refundDatasetRepository.findByDatasetId(datasetId)
 
         return records
-            .map { record -> buildRiskScore(record, records) }
+            .map { record -> buildRiskScore(datasetId, record, records) }
             .filter { riskScore -> riskScore.riskScore >= 31 }
             .sortedByDescending { riskScore -> riskScore.riskScore }
             .map { riskScore ->
@@ -49,7 +49,8 @@ class ScoringService(
         val record = refundDatasetRepository.findByReturnId(returnId)
             ?: error("Return approval was not found: $returnId")
 
-        return buildRiskScore(record, records)
+        // Надо сделать на week 3
+        return buildRiskScore("demo", record, records)
     }
 
     fun getAgentRiskSummary(agentId: String): AgentRiskSummary {
@@ -67,7 +68,7 @@ class ScoringService(
             )
         }
 
-        val riskScores = agentRecords.map { record -> buildRiskScore(record, records) }
+        val riskScores = agentRecords.map { record -> buildRiskScore("demo", record, records) }
         val suspiciousScores = riskScores.filter { it.riskScore >= 31 }
 
         val topReason = suspiciousScores
@@ -91,7 +92,7 @@ class ScoringService(
     fun recalculateDataset(datasetId: String): RecalculateResponse {
         val records = refundDatasetRepository.findByDatasetId(datasetId)
         val suspiciousApprovals = records
-            .map { record -> buildRiskScore(record, records) }
+            .map { record -> buildRiskScore(datasetId, record, records) }
             .count { riskScore -> riskScore.riskScore >= 31 }
 
         return RecalculateResponse(
@@ -109,6 +110,7 @@ class ScoringService(
     }
 
     private fun buildRiskScore(
+        datasetId: String,
         record: RefundApprovalRecord,
         allRecords: List<RefundApprovalRecord>
     ): RefundApprovalRiskScore {
@@ -121,7 +123,7 @@ class ScoringService(
             orderId = record.orderId,
             customerId = record.customerId,
             supportAgentId = record.supportAgentId,
-            datasetId = "demo",
+            datasetId = datasetId,
             riskScore = score,
             riskLevel = resolveRiskLevel(score),
             topReason = reasons.firstOrNull()?.message ?: "No significant risk factors detected",

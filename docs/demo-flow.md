@@ -104,3 +104,13 @@ flowchart TD
 <h2 align="center">Example Investigation Narrative</h2>
 
 An analyst opens a high-risk refund approval and sees that the refund was approved in two minutes, had no evidence, used a manual override, and refunded almost the full order amount. The same support agent also has an unusually high approval rate and has repeatedly approved refunds for the same customer.
+
+<h2 align="center">Demo Scoring Checks</h2>
+
+```bash
+curl http://localhost:8083/api/scoring/health
+curl http://localhost:8083/api/scoring/datasets/demo/suspicious-approvals
+curl http://localhost:8083/api/scoring/returns/return_3041/risk
+curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/details
+curl http://localhost:8083/api/scoring/agents/agent_777/risk-summary
+```

@@ -66,8 +66,10 @@ Payload:
 {
   "datasetId": "dataset_123",
   "jobId": "job_456",
-  "scoredApprovals": 1200,
-  "suspiciousApprovals": 37,
+  "scoredApprovalsCount": 1200,
+  "suspiciousApprovalsCount": 37,
+  "status": "COMPLETED",
+  "eventType": "refund.scoring.completed",
   "timestamp": "2026-06-01T10:15:00Z"
 }
 ```
