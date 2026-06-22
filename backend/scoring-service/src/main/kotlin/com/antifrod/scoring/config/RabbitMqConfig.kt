@@ -10,14 +10,20 @@ import org.springframework.context.annotation.Configuration
 
 @Configuration
 class RabbitMqConfig {
+    companion object {
+        const val PIPELINE_EXCHANGE = "pipeline.exchange"
+        const val REFUND_RELATIONS_BUILT_QUEUE = "scoring.refund-relations-built.queue"
+        const val REFUND_RELATIONS_BUILT_ROUTING_KEY = "refund.relations.built"
+    }
+
     @Bean
     fun pipelineExchange(): DirectExchange {
-        return DirectExchange("pipeline.exchange")
+        return DirectExchange(PIPELINE_EXCHANGE)
     }
 
     @Bean
     fun relationsBuiltQueue(): Queue {
-        return Queue("scoring.relations-built.queue", true)
+        return Queue(REFUND_RELATIONS_BUILT_QUEUE, true)
     }
 
     @Bean
@@ -28,6 +34,6 @@ class RabbitMqConfig {
         return BindingBuilder
             .bind(relationsBuiltQueue)
             .to(pipelineExchange)
-            .with("relations.built")
+            .with(REFUND_RELATIONS_BUILT_ROUTING_KEY)
     }
 }

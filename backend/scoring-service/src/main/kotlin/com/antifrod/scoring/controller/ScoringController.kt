@@ -2,6 +2,7 @@ package com.antifrod.scoring.controller
 
 import com.antifrod.scoring.model.AgentRiskSummary
 import com.antifrod.scoring.model.RecalculateResponse
+import com.antifrod.scoring.model.RefundApprovalDetailsResponse
 import com.antifrod.scoring.model.RefundApprovalRiskScore
 import com.antifrod.scoring.model.SuspiciousRefundApproval
 import com.antifrod.scoring.service.ScoringService
@@ -31,11 +32,35 @@ class ScoringController(
         return scoringService.getReturnRisk(returnId)
     }
 
+    @GetMapping("/datasets/{datasetId}/returns/{returnId}/risk")
+    fun getReturnRiskByDataset(
+        @PathVariable datasetId: String,
+        @PathVariable returnId: String
+    ): RefundApprovalRiskScore {
+        return scoringService.getReturnRisk(datasetId, returnId)
+    }
+
     @GetMapping("/agents/{agentId}/risk-summary")
     fun getAgentRiskSummary(
         @PathVariable agentId: String
     ): AgentRiskSummary {
         return scoringService.getAgentRiskSummary(agentId)
+    }
+
+    @GetMapping("/datasets/{datasetId}/agents/{agentId}/risk-summary")
+    fun getAgentRiskSummaryByDataset(
+        @PathVariable datasetId: String,
+        @PathVariable agentId: String
+    ): AgentRiskSummary {
+        return scoringService.getAgentRiskSummary(datasetId, agentId)
+    }
+
+    @GetMapping("/datasets/{datasetId}/returns/{returnId}/details")
+    fun getReturnDetails(
+        @PathVariable datasetId: String,
+        @PathVariable returnId: String
+    ): RefundApprovalDetailsResponse {
+        return scoringService.getReturnDetails(datasetId, returnId)
     }
 
     @PostMapping("/datasets/{datasetId}/recalculate")
