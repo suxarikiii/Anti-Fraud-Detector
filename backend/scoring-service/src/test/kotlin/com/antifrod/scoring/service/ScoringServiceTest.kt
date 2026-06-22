@@ -98,4 +98,29 @@ class ScoringServiceTest {
 
         assertNotNull(risk.calculatedAt)
     }
+
+    @Test
+    fun `should include fast approval reason`() {
+        val risk = scoringService.getReturnRisk("return_3016")
+
+        assertTrue(risk.reasons.any { it.type == "FAST_APPROVAL" })
+    }
+
+    @Test
+    fun `should return refund approval details with risk data`() {
+        val details = scoringService.getReturnDetails("demo", "return_3041")
+
+        assertEquals("return_3041", details.returnId)
+        assertEquals("demo", details.datasetId)
+        assertEquals("order_1041", details.orderId)
+        assertEquals("customer_999", details.customerId)
+        assertEquals("agent_999", details.supportAgentId)
+
+        assertTrue(details.orderAmount > 0.0)
+        assertTrue(details.refundAmount > 0.0)
+        assertEquals("APPROVED", details.decision)
+        assertEquals(RiskLevel.CRITICAL, details.riskLevel)
+        assertEquals(100, details.riskScore)
+        assertTrue(details.reasons.isNotEmpty())
+    }
 }
