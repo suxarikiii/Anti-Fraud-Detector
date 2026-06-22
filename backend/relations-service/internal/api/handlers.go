@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -53,7 +54,18 @@ func (h *Handler) ReturnRelationsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.Service.GetReturnRelations(returnID))
+	relations, err := h.Service.GetReturnRelations(returnID)
+	if err != nil {
+		if errors.Is(err, service.ErrReturnNotFound) {
+			writeError(w, http.StatusNotFound, "return %s not found", returnID)
+			return
+		}
+		h.Logger.Error("return relations error", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get return relations: %v", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, relations)
 }
 
 func (h *Handler) CustomerHistoryHandler(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +95,18 @@ func (h *Handler) ReturnFeaturesHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.Service.GetReturnFeatures(returnID))
+	features, err := h.Service.GetReturnFeatures(returnID)
+	if err != nil {
+		if errors.Is(err, service.ErrReturnNotFound) {
+			writeError(w, http.StatusNotFound, "return %s not found", returnID)
+			return
+		}
+		h.Logger.Error("return features error", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get return features: %v", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, features)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value interface{}) {
