@@ -81,6 +81,8 @@ services:
     image: ${IMAGE_PREFIX:-ammmiii/anti-fraud}-relations-service:${IMAGE_TAG:-latest}
     build:
       context: ./backend/relations-service
+    ports:
+      - "8082:8082"
     environment:
       SERVER_PORT: ":8082"
       RABBITMQ_ENABLED: "true"

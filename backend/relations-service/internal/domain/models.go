@@ -1,9 +1,27 @@
 package domain
 
 type DatasetRebuildResponse struct {
-	DatasetID string `json:"datasetId"`
-	JobID     string `json:"jobId"`
-	Status    string `json:"status"`
+	DatasetID      string `json:"datasetId"`
+	JobID          string `json:"jobId"`
+	Status         string `json:"status"`
+	RelationsCount int    `json:"relationsCount"`
+	FeaturesCount  int    `json:"featuresCount"`
+}
+
+type NormalizedReturnRecord struct {
+	DatasetID       string  `json:"datasetId"`
+	ReturnID        string  `json:"returnId"`
+	CustomerID      string  `json:"customerId"`
+	OrderID         string  `json:"orderId"`
+	SupportAgentID  string  `json:"supportAgentId"`
+	ProductCategory string  `json:"productCategory"`
+	ReturnReason    string  `json:"returnReason"`
+	DecisionID      string  `json:"decisionId"`
+	DecisionStatus  string  `json:"decisionStatus"`
+	RefundAmount    float64 `json:"refundAmount"`
+	OrderAmount     float64 `json:"orderAmount"`
+	ManualOverride  bool    `json:"manualOverride"`
+	DecisionTimeMs  int     `json:"decisionTimeMs"`
 }
 
 type ReturnRelations struct {
@@ -72,12 +90,18 @@ type ReturnFeaturesResponse struct {
 }
 
 type RelationFeatures struct {
-	CustomerReturnCount         int     `json:"customerReturnCount"`
-	CustomerApprovedRefundCount int     `json:"customerApprovedRefundCount"`
-	AgentApprovalRate           float64 `json:"agentApprovalRate"`
-	AgentHighValueApprovalCount int     `json:"agentHighValueApprovalCount"`
-	CustomerAgentPairCount      int     `json:"customerAgentPairCount"`
-	CategoryRefundRate          float64 `json:"categoryRefundRate"`
-	SimilarReturnsCount         int     `json:"similarReturnsCount"`
-	ClusterSize                 int     `json:"clusterSize"`
+	CustomerReturnCount           int      `json:"customerReturnCount"`
+	CustomerApprovedRefundCount   int      `json:"customerApprovedRefundCount"`
+	AgentApprovalRate             float64  `json:"agentApprovalRate"`
+	AgentManualOverrideRate       float64  `json:"agentManualOverrideRate"`
+	AgentHighValueApprovalCount   int      `json:"agentHighValueApprovalCount"`
+	CustomerAgentPairCount        int      `json:"customerAgentPairCount"`
+	AgentCustomerInteractionCount int      `json:"agentCustomerInteractionCount"`
+	CategoryRefundRate            float64  `json:"categoryRefundRate"`
+	RefundAmountRatio             float64  `json:"refundAmountRatio"`
+	SimilarReturnsCount           int      `json:"similarReturnsCount"`
+	SameReasonRefundCount         int      `json:"sameReasonRefundCount"`
+	ClusterSize                   int      `json:"clusterSize"`
+	StrongestRelationType         string   `json:"strongestRelationType"`
+	TopRelatedReturns             []string `json:"topRelatedReturns"`
 }
