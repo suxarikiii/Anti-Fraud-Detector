@@ -58,12 +58,20 @@ import antiFraudLogoMark from "./assets/brand/anti-fraud-logo-mark.png";
 type Page = "dataset" | "approvals" | "details";
 type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type Decision = "APPROVED" | "REJECTED";
+type ColumnMapping = Record<string, string>;
+type PreviewRow = Record<string, string>;
+
+type DatasetPreview = {
+  headers: string[];
+  rows: PreviewRow[];
+};
 
 type Approval = {
   returnId: string;
   orderId: string;
   customerId: string;
   supportAgentId: string;
+  datasetId?: string;
   refundAmount: number;
   decision: Decision;
   riskScore: number;
@@ -78,16 +86,45 @@ type Explanation = {
 };
 
 type ReturnRisk = Approval & {
+  datasetId: string;
   orderAmount: number;
   productCategory: string;
   returnReason: string;
   evidenceProvided: boolean;
   manualOverride: boolean;
   decisionTimeMinutes: number;
-  paymentMethod: string;
-  shippingRegion: string;
-  explanations: Explanation[];
+  timestamp?: string;
+  calculatedAt?: string;
+  paymentMethod?: string;
+  shippingRegion?: string;
+  reasons: Explanation[];
   relatedApprovals: Approval[];
+};
+
+type ReturnDetailsResponse = Partial<Omit<ReturnRisk, "reasons">> & {
+  reasons?: Explanation[];
+  explanations?: Explanation[];
+};
+
+type UploadResponse = {
+  datasetId?: string;
+  jobId?: string;
+};
+
+type AnalysisJobStatus = {
+  id?: string;
+  jobId?: string;
+  datasetId?: string;
+  status?: string;
+  currentStep?: string;
+  updatedAt?: string;
+};
+
+type ApiEnvelope<T> = T | {
+  data?: T;
+  datasetId?: string;
+  jobId?: string;
+  message?: string;
 };
 
 type AnalysisStatus =
@@ -98,9 +135,9 @@ type AnalysisStatus =
   | "SCORING"
   | "COMPLETED";
 
-const datasetId = "dataset_demo_001";
+const scoringDatasetId = "demo";
 
-const previewRows = [
+const fallbackPreviewRows: PreviewRow[] = [
   {
     order_id: "order_456",
     customer_id: "customer_789",
@@ -145,7 +182,7 @@ const previewRows = [
   },
 ];
 
-const mapping = {
+const fallbackMapping: ColumnMapping = {
   order_id: "order_id",
   customer_id: "customer_id",
   return_id: "return_id",
@@ -160,7 +197,7 @@ const mapping = {
   decision_time_minutes: "decision_time_minutes",
 };
 
-const approvals: Approval[] = [
+const fallbackApprovals: Approval[] = [
   {
     returnId: "return_123",
     orderId: "order_456",
@@ -219,7 +256,8 @@ const approvals: Approval[] = [
 ];
 
 const riskDetails: ReturnRisk = {
-  ...approvals[0],
+  ...fallbackApprovals[0],
+  datasetId: scoringDatasetId,
   orderAmount: 11999,
   productCategory: "electronics",
   returnReason: "item_not_as_described",
@@ -228,7 +266,7 @@ const riskDetails: ReturnRisk = {
   decisionTimeMinutes: 2,
   paymentMethod: "card",
   shippingRegion: "Moscow",
-  explanations: [
+  reasons: [
     {
       type: "NO_EVIDENCE",
       message: "Return was approved without photo, chat, or delivery evidence.",
@@ -255,7 +293,7 @@ const riskDetails: ReturnRisk = {
       scoreImpact: 25,
     },
   ],
-  relatedApprovals: approvals.slice(1, 4),
+  relatedApprovals: fallbackApprovals.slice(1, 4),
 };
 
 const statusSteps: AnalysisStatus[] = [
@@ -327,22 +365,180 @@ function formatEnum(value: string) {
     .join(" ");
 }
 
-async function fetchJson<T>(url: string, fallback: T): Promise<T> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function unwrapData<T>(value: ApiEnvelope<T>): T {
+  if (isRecord(value) && "data" in value) return value.data as T;
+  return value as T;
+}
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  if (!response.ok) throw new Error(response.statusText);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) throw new Error("Expected JSON response");
+  return (await response.json()) as T;
+}
+
+async function fetchJson<T>(url: string, fallback: T, init?: RequestInit): Promise<T> {
   try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(response.statusText);
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("application/json")) throw new Error("Expected JSON response");
-    return (await response.json()) as T;
+    return await requestJson<T>(url, init);
   } catch {
     return fallback;
   }
+}
+
+function normalizeUploadResponse(raw: ApiEnvelope<UploadResponse>): UploadResponse {
+  const data = unwrapData<UploadResponse>(raw);
+  return {
+    datasetId: data?.datasetId ?? (isRecord(raw) ? String(raw.datasetId ?? "") : ""),
+    jobId: data?.jobId ?? (isRecord(raw) ? String(raw.jobId ?? "") : ""),
+  };
+}
+
+function normalizePreview(raw: unknown): DatasetPreview {
+  const value = unwrapData(raw as ApiEnvelope<unknown>);
+
+  if (Array.isArray(value)) {
+    const rows = value.filter(isRecord).map((row) =>
+      Object.fromEntries(Object.entries(row).map(([key, cell]) => [key, String(cell ?? "")])),
+    );
+    return {
+      headers: rows[0] ? Object.keys(rows[0]) : [],
+      rows,
+    };
+  }
+
+  if (!isRecord(value)) {
+    return { headers: [], rows: [] };
+  }
+
+  const headers = Array.isArray(value.headers) ? value.headers.map(String) : [];
+  const rowsValue = Array.isArray(value.rows) ? value.rows : [];
+  const rows = rowsValue.map((row) => {
+    if (Array.isArray(row)) {
+      return Object.fromEntries(headers.map((header, index) => [header, String(row[index] ?? "")]));
+    }
+    if (isRecord(row)) {
+      return Object.fromEntries(Object.entries(row).map(([key, cell]) => [key, String(cell ?? "")]));
+    }
+    return {};
+  });
+
+  return {
+    headers: headers.length > 0 ? headers : rows[0] ? Object.keys(rows[0]) : [],
+    rows,
+  };
+}
+
+function normalizeRiskLevel(value: unknown, score = 0): RiskLevel {
+  const normalized = String(value ?? "").toUpperCase();
+  if (normalized === "LOW" || normalized === "MEDIUM" || normalized === "HIGH" || normalized === "CRITICAL") {
+    return normalized;
+  }
+  if (score >= 80) return "CRITICAL";
+  if (score >= 60) return "HIGH";
+  if (score >= 30) return "MEDIUM";
+  return "LOW";
+}
+
+function normalizeDecision(value: unknown): Decision {
+  return String(value ?? "APPROVED").toUpperCase() === "REJECTED" ? "REJECTED" : "APPROVED";
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function normalizeApproval(raw: unknown, datasetId: string): Approval | null {
+  if (!isRecord(raw)) return null;
+  const refundAmount = toNumber(raw.refundAmount ?? raw.refund_amount, 0);
+  const riskScore = toNumber(raw.riskScore ?? raw.risk_score, 0);
+  const returnId = String(raw.returnId ?? raw.return_id ?? raw.id ?? "");
+  if (!returnId) return null;
+
+  return {
+    returnId,
+    orderId: String(raw.orderId ?? raw.order_id ?? ""),
+    customerId: String(raw.customerId ?? raw.customer_id ?? ""),
+    supportAgentId: String(raw.supportAgentId ?? raw.support_agent_id ?? ""),
+    datasetId: String(raw.datasetId ?? raw.dataset_id ?? datasetId),
+    refundAmount,
+    decision: normalizeDecision(raw.decision),
+    riskScore,
+    riskLevel: normalizeRiskLevel(raw.riskLevel ?? raw.risk_level, riskScore),
+    topReason: String(raw.topReason ?? raw.top_reason ?? "Risk reasons are available in the details view"),
+  };
+}
+
+function normalizeApprovals(raw: unknown, datasetId: string): Approval[] {
+  const value = unwrapData(raw as ApiEnvelope<unknown>);
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizeApproval(item, datasetId))
+    .filter((item): item is Approval => item !== null);
+}
+
+function normalizeStatusStep(status: AnalysisJobStatus): AnalysisStatus {
+  const rawStep = String(status.currentStep ?? status.status ?? "UPLOADED").toUpperCase();
+  if (rawStep === "READY" || rawStep === "DONE" || rawStep === "COMPLETE") return "COMPLETED";
+  if (statusSteps.includes(rawStep as AnalysisStatus)) return rawStep as AnalysisStatus;
+  return "UPLOADED";
+}
+
+function isCompletedStatus(status: AnalysisJobStatus) {
+  const rawStatus = String(status.status ?? status.currentStep ?? "").toUpperCase();
+  return ["COMPLETED", "READY", "DONE", "COMPLETE"].includes(rawStatus);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function buildReturnDetailsFallback(approval: Approval): ReturnRisk {
+  return {
+    ...riskDetails,
+    ...approval,
+    datasetId: approval.datasetId ?? riskDetails.datasetId,
+    relatedApprovals: riskDetails.relatedApprovals.filter((item) => item.returnId !== approval.returnId),
+  };
+}
+
+function toReturnRisk(data: ReturnDetailsResponse, approval: Approval): ReturnRisk {
+  const fallback = buildReturnDetailsFallback(approval);
+  return {
+    ...fallback,
+    ...data,
+    returnId: data.returnId ?? approval.returnId,
+    orderId: data.orderId ?? approval.orderId,
+    customerId: data.customerId ?? approval.customerId,
+    supportAgentId: data.supportAgentId ?? approval.supportAgentId,
+    datasetId: data.datasetId ?? approval.datasetId ?? scoringDatasetId,
+    refundAmount: data.refundAmount ?? approval.refundAmount,
+    decision: data.decision ?? approval.decision,
+    riskScore: data.riskScore ?? approval.riskScore,
+    riskLevel: data.riskLevel ?? approval.riskLevel,
+    topReason: data.topReason ?? approval.topReason,
+    reasons: data.reasons ?? data.explanations ?? fallback.reasons,
+    relatedApprovals: data.relatedApprovals ?? fallback.relatedApprovals,
+  };
 }
 
 function App() {
   const [page, setPage] = useState<Page>(getInitialPage);
   const [uploadedFile, setUploadedFile] = useState("refunds_week1_demo.csv");
   const [uploadProgress, setUploadProgress] = useState(100);
+  const [isUploading, setIsUploading] = useState(false);
+  const [currentDatasetId, setCurrentDatasetId] = useState(scoringDatasetId);
+  const [currentJobId, setCurrentJobId] = useState("");
+  const [previewData, setPreviewData] = useState<DatasetPreview>(() => normalizePreview(fallbackPreviewRows));
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>(fallbackMapping);
+  const [approvalRows, setApprovalRows] = useState<Approval[]>(
+    fallbackApprovals.map((approval) => ({ ...approval, datasetId: scoringDatasetId })),
+  );
   const [selectedApproval, setSelectedApproval] = useState<ReturnRisk>(riskDetails);
   const [riskFilter, setRiskFilter] = useState<"ALL" | RiskLevel>("ALL");
   const [query, setQuery] = useState("");
@@ -352,7 +548,7 @@ function App() {
 
   const filteredApprovals = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return approvals.filter((approval) => {
+    return approvalRows.filter((approval) => {
       const matchesRisk = riskFilter === "ALL" || approval.riskLevel === riskFilter;
       const matchesSearch =
         !normalized ||
@@ -362,35 +558,130 @@ function App() {
           .includes(normalized);
       return matchesRisk && matchesSearch;
     });
-  }, [query, riskFilter]);
+  }, [approvalRows, query, riskFilter]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+
     setUploadedFile(file.name);
+    setIsUploading(true);
     setUploadProgress(35);
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
-    setUploadProgress(100);
+    setCurrentJobId("");
+    setAnalysisStepIndex(-1);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const upload = normalizeUploadResponse(
+        await requestJson<ApiEnvelope<UploadResponse>>("/api/datasets/upload", {
+          method: "POST",
+          body: formData,
+        }),
+      );
+      const uploadedDatasetId = upload.datasetId || scoringDatasetId;
+
+      setCurrentDatasetId(uploadedDatasetId);
+      setCurrentJobId(upload.jobId ?? "");
+      setUploadProgress(70);
+
+      const preview = await requestJson<ApiEnvelope<unknown>>(`/api/datasets/${uploadedDatasetId}/preview`)
+        .then(normalizePreview)
+        .catch(() => normalizePreview(fallbackPreviewRows));
+
+      setPreviewData(preview.rows.length > 0 ? preview : normalizePreview(fallbackPreviewRows));
+      setColumnMapping(fallbackMapping);
+      setAnalysisStepIndex(0);
+    } catch {
+      setCurrentDatasetId(scoringDatasetId);
+      setPreviewData(normalizePreview(fallbackPreviewRows));
+      setColumnMapping(fallbackMapping);
+      setAnalysisStepIndex(0);
+    } finally {
+      setUploadProgress(100);
+      setIsUploading(false);
+    }
   }
 
   async function startAnalysis() {
+    const datasetId = currentDatasetId || scoringDatasetId;
+    let lastStepIndex = 0;
+
     setIsAnalyzing(true);
     setAnalysisStepIndex(0);
-    await fetchJson(`/api/datasets/${datasetId}/preview`, previewRows);
-    for (let index = 0; index < statusSteps.length; index += 1) {
-      setAnalysisStepIndex(index);
-      await new Promise((resolve) => window.setTimeout(resolve, index === statusSteps.length - 1 ? 900 : 1100));
+
+    try {
+      const startResponse = normalizeUploadResponse(
+        await requestJson<ApiEnvelope<UploadResponse>>(`/api/analysis/${datasetId}/start`, {
+          method: "POST",
+        }),
+      );
+      const jobId = startResponse.jobId || currentJobId;
+      if (!jobId) throw new Error("Missing analysis job id");
+
+      setCurrentJobId(jobId);
+
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const status = unwrapData(
+          await requestJson<ApiEnvelope<AnalysisJobStatus>>(`/api/analysis/${jobId}/status`),
+        );
+        const step = normalizeStatusStep(status);
+        const stepIndex = statusSteps.indexOf(step);
+        if (stepIndex >= 0) {
+          lastStepIndex = stepIndex;
+          setAnalysisStepIndex(stepIndex);
+        }
+        if (step === "COMPLETED" || isCompletedStatus(status)) break;
+        await sleep(1000);
+      }
+    } catch {
+      lastStepIndex = 0;
     }
+
+    if (lastStepIndex < statusSteps.length - 1) {
+      for (let index = Math.max(lastStepIndex + 1, 1); index < statusSteps.length; index += 1) {
+        setAnalysisStepIndex(index);
+        await sleep(index === statusSteps.length - 1 ? 500 : 700);
+      }
+    }
+
+    setAnalysisStepIndex(statusSteps.length - 1);
     setIsAnalyzing(false);
+    await loadSuspiciousApprovals(datasetId);
     setPage("approvals");
   }
 
-  async function openApproval(approval: Approval) {
-    const data = await fetchJson<ReturnRisk>(
-      `/api/scoring/returns/${approval.returnId}/risk`,
-      { ...riskDetails, ...approval },
+  async function loadSuspiciousApprovals(datasetId: string) {
+    const datasetCandidates = [datasetId, scoringDatasetId].filter(
+      (value, index, values) => value && values.indexOf(value) === index,
     );
-    setSelectedApproval(data);
+
+    for (const candidate of datasetCandidates) {
+      try {
+        const raw = await requestJson<ApiEnvelope<unknown>>(
+          `/api/scoring/datasets/${candidate}/suspicious-approvals`,
+        );
+        const normalized = normalizeApprovals(raw, candidate);
+        if (normalized.length > 0) {
+          setApprovalRows(normalized);
+          return;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    setApprovalRows(fallbackApprovals.map((approval) => ({ ...approval, datasetId: scoringDatasetId })));
+  }
+
+  async function openApproval(approval: Approval) {
+    const detailDatasetId = approval.datasetId ?? currentDatasetId ?? scoringDatasetId;
+    const data = await fetchJson<ApiEnvelope<ReturnDetailsResponse>>(
+      `/api/scoring/datasets/${detailDatasetId}/returns/${approval.returnId}/details`,
+      buildReturnDetailsFallback(approval),
+    );
+    setSelectedApproval(toReturnRisk(unwrapData(data), approval));
     setPage("details");
   }
 
@@ -447,6 +738,11 @@ function App() {
           <DatasetPage
             uploadedFile={uploadedFile}
             uploadProgress={uploadProgress}
+            isUploading={isUploading}
+            datasetId={currentDatasetId}
+            jobId={currentJobId}
+            previewData={previewData}
+            columnMapping={columnMapping}
             isAnalyzing={isAnalyzing}
             analysisStepIndex={analysisStepIndex}
             onUpload={handleUpload}
@@ -472,6 +768,11 @@ function App() {
 function DatasetPage({
   uploadedFile,
   uploadProgress,
+  isUploading,
+  datasetId,
+  jobId,
+  previewData,
+  columnMapping,
   isAnalyzing,
   analysisStepIndex,
   onUpload,
@@ -479,6 +780,11 @@ function DatasetPage({
 }: {
   uploadedFile: string;
   uploadProgress: number;
+  isUploading: boolean;
+  datasetId: string;
+  jobId: string;
+  previewData: DatasetPreview;
+  columnMapping: ColumnMapping;
   isAnalyzing: boolean;
   analysisStepIndex: number;
   onUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -508,13 +814,26 @@ function DatasetPage({
                 <CProgressBar color="primary" value={uploadProgress} />
               </CProgress>
 
-              {isAnalyzing && (
+              <CListGroup flush className="mb-4">
+                <CListGroupItem className="info-row">
+                  <span className="text-body-secondary">Dataset ID</span>
+                  <strong>{datasetId}</strong>
+                </CListGroupItem>
+                {jobId && (
+                  <CListGroupItem className="info-row">
+                    <span className="text-body-secondary">Job ID</span>
+                    <strong>{jobId}</strong>
+                  </CListGroupItem>
+                )}
+              </CListGroup>
+
+              {(isUploading || isAnalyzing) && (
                 <div className="document-loader mb-4" role="status" aria-live="polite">
                   <div className="document-loader-icon">
                     <FileSpreadsheet size={24} />
                   </div>
                   <div className="flex-grow-1">
-                    <strong>Preparing document</strong>
+                    <strong>{isUploading ? "Uploading document" : "Preparing document"}</strong>
                     <CProgress className="mt-2" height={8}>
                       <CProgressBar color="primary" animated value={100} />
                     </CProgress>
@@ -522,10 +841,14 @@ function DatasetPage({
                 </div>
               )}
 
-              <CButton color="primary" disabled={isAnalyzing} onClick={onStart}>
+              <CButton color="primary" disabled={isUploading || isAnalyzing} onClick={onStart}>
                 {isAnalyzing ? (
                   <>
                     Analyzing <span className="button-spinner" aria-hidden="true" />
+                  </>
+                ) : isUploading ? (
+                  <>
+                    Uploading <span className="button-spinner" aria-hidden="true" />
                   </>
                 ) : (
                   <>
@@ -545,7 +868,7 @@ function DatasetPage({
             <CCardBody>
               <CListGroup flush>
                 {statusSteps.map((step, index) => {
-                  const isComplete = isAnalyzing && index < analysisStepIndex;
+                  const isComplete = index < analysisStepIndex || (!isAnalyzing && analysisStepIndex >= index);
                   const isActive = isAnalyzing && index === analysisStepIndex;
                   const stateLabel = isActive
                     ? "In progress"
@@ -554,22 +877,54 @@ function DatasetPage({
                       : "Waiting";
 
                   return (
-                  <CListGroupItem
-                    className={`status-step ${isComplete ? "complete" : ""} ${isActive ? "active" : ""}`}
-                    key={step}
-                  >
-                    <span className="status-marker">
-                      <CheckCircle2 size={18} />
-                    </span>
-                    <div>
-                      <strong>{formatEnum(step)}</strong>
-                      <div className="text-body-secondary small">{stateLabel}</div>
-                    </div>
-                  </CListGroupItem>
+                    <CListGroupItem
+                      className={`status-step ${isComplete ? "complete" : ""} ${isActive ? "active" : ""}`}
+                      key={step}
+                    >
+                      <span className="status-marker">
+                        <CheckCircle2 size={18} />
+                      </span>
+                      <div>
+                        <strong>{formatEnum(step)}</strong>
+                        <div className="text-body-secondary small">{stateLabel}</div>
+                      </div>
+                    </CListGroupItem>
                   );
                 })}
               </CListGroup>
             </CCardBody>
+          </CCard>
+        </CCol>
+      </CRow>
+
+      <CRow className="g-4">
+        <CCol xl={8}>
+          <CCard className="h-100">
+            <CCardHeader>
+              <SectionTitle icon={FileSpreadsheet} title="Dataset preview" text="Rows returned by the upload service preview endpoint." />
+            </CCardHeader>
+            <CCardBody>
+              <DataTable
+                columns={previewData.headers}
+                rows={previewData.rows}
+                renderCell={(row, column) => formatPreviewCell(String(row[column] ?? ""))}
+              />
+            </CCardBody>
+          </CCard>
+        </CCol>
+        <CCol xl={4}>
+          <CCard className="h-100">
+            <CCardHeader>
+              <SectionTitle icon={Filter} title="Column mapping" text="Detected normalization contract for uploaded rows." />
+            </CCardHeader>
+            <CListGroup flush>
+              {Object.entries(columnMapping).map(([source, target]) => (
+                <CListGroupItem className="d-flex mapping-item" key={source}>
+                  <span className="text-body-secondary">{source}</span>
+                  <strong>{target}</strong>
+                </CListGroupItem>
+              ))}
+            </CListGroup>
           </CCard>
         </CCol>
       </CRow>
@@ -593,12 +948,19 @@ function ApprovalsPage({
   onRiskFilterChange: (value: "ALL" | RiskLevel) => void;
   onOpenApproval: (approval: Approval) => void;
 }) {
+  const criticalCount = approvals.filter((approval) => approval.riskLevel === "CRITICAL").length;
+  const highCount = approvals.filter((approval) => approval.riskLevel === "HIGH").length;
+  const averageScore =
+    approvals.length > 0
+      ? (approvals.reduce((total, approval) => total + approval.riskScore, 0) / approvals.length).toFixed(1)
+      : "0.0";
+
   return (
     <CContainer fluid className="px-0">
       <CRow className="g-3 mb-4">
-        <MetricCard icon={ShieldAlert} label="Critical cases" value="2" color="danger" />
-        <MetricCard icon={AlertTriangle} label="High-risk cases" value="3" color="warning" />
-        <MetricCard icon={BarChart3} label="Average risk score" value="60.2" />
+        <MetricCard icon={ShieldAlert} label="Critical cases" value={String(criticalCount)} color="danger" />
+        <MetricCard icon={AlertTriangle} label="High-risk cases" value={String(highCount)} color="warning" />
+        <MetricCard icon={BarChart3} label="Average risk score" value={averageScore} />
       </CRow>
 
       <CCard>
@@ -708,7 +1070,7 @@ function DetailsPage({
             ["Order ID", approval.orderId],
             ["Order amount", formatMoney(approval.orderAmount)],
             ["Category", formatEnum(approval.productCategory)],
-            ["Payment", formatEnum(approval.paymentMethod)],
+            ["Payment", approval.paymentMethod ? formatEnum(approval.paymentMethod) : "Unknown"],
           ]}
         />
         <InfoPanel
@@ -729,7 +1091,7 @@ function DetailsPage({
               <strong>Why this is risky</strong>
             </CCardHeader>
             <CListGroup flush>
-              {approval.explanations.map((item) => (
+              {approval.reasons.map((item) => (
                 <CListGroupItem className="explanation-item" key={item.type}>
                   <div>
                     <strong>{formatEnum(item.type)}</strong>
