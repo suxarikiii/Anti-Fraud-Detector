@@ -3,5 +3,6 @@ package com.antifrod.scoring.model
 enum class RiskLevel {
     LOW,
     MEDIUM,
-    HIGH
+    HIGH,
+    CRITICAL
 }

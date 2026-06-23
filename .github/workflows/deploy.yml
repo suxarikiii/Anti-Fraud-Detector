@@ -1,0 +1,66 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: docker.io
+  IMAGE_PREFIX: ${{ secrets.DOCKERHUB_USERNAME }}/anti-fraud
+
+jobs:
+
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: upload-service
+            context: backend/upload-service
+          - service: relations-service
+            context: backend/relations-service
+          - service: scoring-service
+            context: backend/scoring-service
+          - service: frontend
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+      name: Deploy
+      needs: build-and-push
+      runs-on: self-hosted
+      steps:
+        - uses: actions/checkout@v4
+        - name: Deploy
+          run: |
+            mkdir -p ~/anti-fraud/backend/gateway
+            cp docker-compose.yml .env.example ~/anti-fraud/
+            cp backend/gateway/nginx.conf ~/anti-fraud/backend/gateway/
+            cd ~/anti-fraud
+            [ -f .env ] || cp .env.example .env
+            docker compose pull
+            docker compose up -d --no-build --remove-orphans
+            docker image prune -f

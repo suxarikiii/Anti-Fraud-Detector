@@ -95,3 +95,32 @@ func (r *Repository) GetAnalysisJobByID(ctx context.Context, jobID uuid.UUID) (*
 
 	return &job, nil
 }
+
+func (r *Repository) GetLatestAnalysisJobByDatasetID(ctx context.Context, datasetID uuid.UUID) (*domain.AnalysisJob, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT id, dataset_id, status, current_step, error_message, created_at, updated_at
+		 FROM analysis_jobs
+		 WHERE dataset_id = $1
+		 ORDER BY created_at DESC
+		 LIMIT 1`,
+		datasetID,
+	)
+
+	var job domain.AnalysisJob
+	if err := row.Scan(&job.ID, &job.DatasetID, &job.Status, &job.CurrentStep, &job.Error, &job.CreatedAt, &job.UpdatedAt); err != nil {
+		return nil, err
+	}
+
+	return &job, nil
+}
+
+func (r *Repository) UpdateAnalysisStatus(ctx context.Context, jobID uuid.UUID, status, currentStep string, updatedAt time.Time) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE analysis_jobs SET status = $1, current_step = $2, updated_at = $3 WHERE id = $4`,
+		status,
+		currentStep,
+		updatedAt,
+		jobID,
+	)
+	return err
+}

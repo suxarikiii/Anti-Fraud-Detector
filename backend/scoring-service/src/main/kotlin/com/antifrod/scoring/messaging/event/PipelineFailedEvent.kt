@@ -4,8 +4,9 @@ import java.time.Instant
 
 data class PipelineFailedEvent(
     val datasetId: String,
-    val jobId: String,
-    val failedStage: String,
-    val message: String,
-    val publishedAt: Instant
+    val jobId: String? = null,
+    val failedStep: String,
+    val errorMessage: String,
+    val eventType: String = "pipeline.failed",
+    val timestamp: Instant
 )

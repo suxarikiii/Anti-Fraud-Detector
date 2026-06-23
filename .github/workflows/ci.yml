@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  upload-service:
+    name: Upload Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/upload-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: go vet ./...
+      - run: go test -race -cover ./...
+      - name: Build image
+        run: docker build -t upload-service:ci .
+
+  relations-service:
+    name: Relations Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/relations-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: go vet ./...
+      - run: go test -race -cover ./...
+      - name: Build image
+        run: docker build -t relations-service:ci .
+
+  scoring-service:
+    name: Scoring Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/scoring-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew check
+        continue-on-error: true
+      - name: Build image
+        run: docker build -t scoring-service:ci .
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Build image
+        run: docker build -t frontend:ci .

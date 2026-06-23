@@ -1,19 +1,22 @@
 package com.antifrod.scoring.messaging
 
+import com.antifrod.scoring.config.RabbitMqConfig
 import com.antifrod.scoring.messaging.event.PipelineFailedEvent
 import com.antifrod.scoring.messaging.event.RelationsBuiltEvent
 import com.antifrod.scoring.messaging.event.ScoringCompletedEvent
 import com.antifrod.scoring.service.ScoringService
+import org.springframework.amqp.rabbit.annotation.RabbitListener
 import org.springframework.stereotype.Component
 import java.time.Instant
 
 @Component
-class RelationsBuiltConsumer (
+class RelationsBuiltConsumer(
     private val scoringService: ScoringService,
     private val scoringEventPublisher: ScoringEventPublisher
-){
-    @RabbitListener(queues = ["scoring.relations-built.queue"])
-    fun handleRelationBuilt(event: RelationsBuiltEvent){
+) {
+
+    @RabbitListener(queues = [RabbitMqConfig.REFUND_RELATIONS_BUILT_QUEUE])
+    fun handleRelationsBuilt(event: RelationsBuiltEvent) {
         try {
             val result = scoringService.processRelationsBuilt(event.datasetId)
 
@@ -21,9 +24,9 @@ class RelationsBuiltConsumer (
                 ScoringCompletedEvent(
                     datasetId = event.datasetId,
                     jobId = event.jobId,
-                    scoredUsersCount = event.usersCount,
-                    suspiciousUsersCount = result.suspiciousUsersCount,
-                    publishedAt = Instant.now()
+                    scoredApprovalsCount = result.suspiciousApprovalsCount,
+                    suspiciousApprovalsCount = result.suspiciousApprovalsCount,
+                    timestamp = Instant.now()
                 )
             )
         } catch (exception: Exception) {
@@ -31,9 +34,9 @@ class RelationsBuiltConsumer (
                 PipelineFailedEvent(
                     datasetId = event.datasetId,
                     jobId = event.jobId,
-                    failedStage = "SCORING",
-                    message = exception.message ?: "Unknown scoring error",
-                    publishedAt = Instant.now()
+                    failedStep = "SCORING",
+                    errorMessage = exception.message ?: "Unknown scoring error",
+                    timestamp = Instant.now()
                 )
             )
         }

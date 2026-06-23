@@ -67,18 +67,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  headers:
-                    type: array
-                    items:
-                      type: string
-                  rows:
-                    type: array
-                    items:
-                      type: array
-                      items:
-                        type: string
+                $ref: '#/components/schemas/PreviewResponse'
 
   /api/analysis/{datasetId}/start:
     post:
@@ -115,19 +104,41 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  datasetId:
-                    type: string
-                  status:
-                    type: string
-                  currentStep:
-                    type: string
-                  errorMessage:
-                    type: string
-                  createdAt:
-                    type: string
-                  updatedAt:
-                    type: string
+                $ref: '#/components/schemas/AnalysisJob'
+
+components:
+  schemas:
+    PreviewResponse:
+      type: object
+      properties:
+        headers:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+    AnalysisJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        datasetId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        currentStep:
+          type: string
+        errorMessage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

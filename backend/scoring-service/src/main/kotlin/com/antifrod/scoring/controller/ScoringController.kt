@@ -1,8 +1,10 @@
 package com.antifrod.scoring.controller
 
+import com.antifrod.scoring.model.AgentRiskSummary
 import com.antifrod.scoring.model.RecalculateResponse
-import com.antifrod.scoring.model.RiskScore
-import com.antifrod.scoring.model.SuspiciousUser
+import com.antifrod.scoring.model.RefundApprovalDetailsResponse
+import com.antifrod.scoring.model.RefundApprovalRiskScore
+import com.antifrod.scoring.model.SuspiciousRefundApproval
 import com.antifrod.scoring.service.ScoringService
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -16,18 +18,49 @@ class ScoringController(
     private val scoringService: ScoringService
 ) {
 
-    @GetMapping("/datasets/{datasetId}/suspicious-users")
-    fun getSuspiciousUsers(
+    @GetMapping("/datasets/{datasetId}/suspicious-approvals")
+    fun getSuspiciousApprovals(
         @PathVariable datasetId: String
-    ): List<SuspiciousUser> {
-        return scoringService.getSuspiciousUsers(datasetId)
+    ): List<SuspiciousRefundApproval> {
+        return scoringService.getSuspiciousApprovals(datasetId)
     }
 
-    @GetMapping("/users/{userId}/risk")
-    fun getUserRisk(
-        @PathVariable userId: String
-    ): RiskScore {
-        return scoringService.getUserRisk(userId)
+    @GetMapping("/returns/{returnId}/risk")
+    fun getReturnRisk(
+        @PathVariable returnId: String
+    ): RefundApprovalRiskScore {
+        return scoringService.getReturnRisk(returnId)
+    }
+
+    @GetMapping("/datasets/{datasetId}/returns/{returnId}/risk")
+    fun getReturnRiskByDataset(
+        @PathVariable datasetId: String,
+        @PathVariable returnId: String
+    ): RefundApprovalRiskScore {
+        return scoringService.getReturnRisk(datasetId, returnId)
+    }
+
+    @GetMapping("/agents/{agentId}/risk-summary")
+    fun getAgentRiskSummary(
+        @PathVariable agentId: String
+    ): AgentRiskSummary {
+        return scoringService.getAgentRiskSummary(agentId)
+    }
+
+    @GetMapping("/datasets/{datasetId}/agents/{agentId}/risk-summary")
+    fun getAgentRiskSummaryByDataset(
+        @PathVariable datasetId: String,
+        @PathVariable agentId: String
+    ): AgentRiskSummary {
+        return scoringService.getAgentRiskSummary(datasetId, agentId)
+    }
+
+    @GetMapping("/datasets/{datasetId}/returns/{returnId}/details")
+    fun getReturnDetails(
+        @PathVariable datasetId: String,
+        @PathVariable returnId: String
+    ): RefundApprovalDetailsResponse {
+        return scoringService.getReturnDetails(datasetId, returnId)
     }
 
     @PostMapping("/datasets/{datasetId}/recalculate")
