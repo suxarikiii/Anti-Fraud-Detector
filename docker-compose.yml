@@ -110,8 +110,6 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-    volumes:
-      - ./data:/data:ro
     restart: unless-stopped
 
   # ── Gateway ───────────────────────────────────────────
