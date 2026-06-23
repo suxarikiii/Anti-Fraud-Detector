@@ -492,17 +492,89 @@ Optional bonus functionality may include:
 
 <h2 align="center">Project Status</h2>
 
-The project is currently in progress.
+The project is currently in Week 2 implementation.
 
-The current focus is Week 1 implementation:
+The current working version includes:
 
-* service skeletons;
-* dataset upload flow;
-* synthetic refund dataset;
-* RabbitMQ pipeline setup;
-* graph relations model;
-* refund approval scoring model;
-* frontend dashboard mock flow;
-* Docker-based local infrastructure.
+* React / TypeScript frontend dashboard with dataset upload, preview, analysis progress, suspicious approvals table, and refund approval details view;
+* Go upload service with CSV upload, dataset records, analysis job creation, preview API, MinIO file storage, PostgreSQL persistence, and RabbitMQ event publishing;
+* Go relations service with REST endpoints for refund relations, customer history, support agent summary, relation features, and RabbitMQ consumption for normalized dataset events;
+* Kotlin / Spring Boot scoring service with suspicious refund approval detection, dataset-aware scoring endpoints, risk levels, explainable risk reasons, support agent risk summary, and RabbitMQ integration;
+* Nginx gateway routing backend API requests to upload, relations, and scoring services;
+* frontend production proxy support for `/api` requests;
+* RabbitMQ pipeline events for `dataset.uploaded`, `dataset.normalized`, `refund.relations.built`, `refund.scoring.completed`, and `pipeline.failed`;
+* demo refund datasets under `data/` for scoring, dashboard, and investigation flows.
 
-As the system evolves, we will add more details about architecture, API endpoints, data models, deployment, demo flow, validation, and weekly progress.
+Known limitations for the current Week 2 version:
+
+* the full ML / normalization service is still planned as a separate pipeline component;
+* some dashboard flows can still use demo scoring data when uploaded datasets are not yet processed through every backend stage;
+* graph storage is represented by the relations service model and API contracts, while dedicated Graph DB integration remains part of the broader MVP plan;
+* end-to-end analysis status depends on all RabbitMQ pipeline consumers being available in the deployed environment.
+
+---
+
+<h2 align="center">Instructions for Running the Project</h2>
+
+Prerequisites:
+
+* Docker;
+* Docker Compose;
+* available local ports for the frontend, gateway, backend services, PostgreSQL, RabbitMQ, and MinIO.
+
+Run the full project from the repository root when the project Docker Compose configuration is available:
+
+```bash
+docker compose up --build
+```
+
+Run it in the background:
+
+```bash
+docker compose up --build -d
+```
+
+Check running containers:
+
+```bash
+docker compose ps
+```
+
+Open the main local URLs:
+
+* Frontend dashboard: `http://localhost:3000`;
+* Backend gateway: `http://localhost:8080`;
+* RabbitMQ management UI: `http://localhost:15672`;
+* MinIO console: `http://localhost:9001`.
+
+Default local credentials:
+
+* RabbitMQ: `guest` / `guest`;
+* MinIO: `minioadmin` / `minioadmin`;
+* PostgreSQL: `postgres` / `postgres`, database `upload_db`.
+
+Useful API checks:
+
+```bash
+curl http://localhost:8080/api/datasets/health
+curl http://localhost:8080/api/scoring/health
+curl http://localhost:8080/api/scoring/datasets/demo/suspicious-approvals
+```
+
+View logs for the main application services:
+
+```bash
+docker compose logs -f frontend gateway upload-service relations-service scoring-service
+```
+
+Stop the project:
+
+```bash
+docker compose down
+```
+
+Stop the project and remove local persistent volumes:
+
+```bash
+docker compose down -v
+```
