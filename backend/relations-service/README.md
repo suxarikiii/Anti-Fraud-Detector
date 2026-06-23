@@ -130,20 +130,63 @@ Example:
 
 ---
 
-<h2 align="center">REST API</h2>
+<h2 align="center">Running the Relations Service</h2>
 
-Run locally:
+Prerequisites:
+
+* Go;
+* RabbitMQ if `RABBITMQ_ENABLED=true`;
+* free local port `8082`.
+
+If RabbitMQ is not already running, start the shared local broker from the upload-service compose file:
+
+```bash
+cd backend/upload-service
+docker compose up -d rabbitmq
+```
+
+Run locally without RabbitMQ:
 
 ```bash
 cd backend/relations-service
 go run cmd/main.go
 ```
 
-Run through compose:
+Run locally with RabbitMQ enabled:
 
 ```bash
-docker compose up --build relations-service
+cd backend/relations-service
+SERVER_PORT=:8082 \
+RABBITMQ_ENABLED=true \
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/ \
+RABBITMQ_EXCHANGE=pipeline.exchange \
+RABBITMQ_NORMALIZED_QUEUE=relations.dataset-normalized.queue \
+RABBITMQ_NORMALIZED_ROUTING_KEY=dataset.normalized \
+RABBITMQ_RELATIONS_BUILT_ROUTING_KEY=refund.relations.built \
+go run cmd/main.go
 ```
+
+Default port: `:8082`.
+
+Health check:
+
+```bash
+curl http://localhost:8082/api/relations/health
+```
+
+Rebuild relations for a dataset:
+
+```bash
+curl -X POST http://localhost:8082/api/relations/datasets/demo/rebuild
+```
+
+Example relation feature request:
+
+```bash
+curl http://localhost:8082/api/relations/returns/return_3041/features
+```
+
+<h2 align="center">REST API</h2>
 
 Endpoints:
 
