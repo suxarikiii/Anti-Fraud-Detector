@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -137,6 +138,71 @@ FRAUD_SCENARIO_WEIGHTS: Dict[int, float] = {
     8: 0.10,
     9: 0.10,
 }
+
+
+# --------------------------------------------------------------------------- #
+# Legacy fixture block
+#
+# The scoring-service tests are pinned to these exact historical records
+# (specific order/return/agent ids and values). They are embedded verbatim and
+# always emitted first so that regenerating the large dataset never breaks the
+# backend tests. The rows are 5 per scenario, in scenario order 1..9, so the
+# scenario id can be derived from the row index.
+#
+# NOTE: the special entities here (agent_777, agent_888, agent_999,
+# customer_888, customer_900, customer_999) are intentionally NOT reused by the
+# synthetic generator, so their aggregate signals (approval rate, frequency,
+# repeated pairs, cluster) stay identical to the original fixture.
+# --------------------------------------------------------------------------- #
+
+LEGACY_DATASET_CSV = """\
+order_id,customer_id,return_id,support_agent_id,order_amount,refund_amount,product_category,return_reason,evidence_provided,decision,manual_override,decision_time_minutes,timestamp
+order_1001,customer_200,return_3001,agent_001,203.84,199.57,clothing,changed_mind,True,APPROVED,False,64,2026-06-01T09:06:00Z
+order_1002,customer_201,return_3002,agent_005,143.16,131.27,sports,item_not_as_described,True,APPROVED,False,35,2026-06-01T09:22:00Z
+order_1003,customer_202,return_3003,agent_001,41.07,15.85,beauty,changed_mind,True,APPROVED,False,42,2026-06-01T09:47:00Z
+order_1004,customer_203,return_3004,agent_002,81.12,73.92,beauty,allergic_reaction,True,APPROVED,False,80,2026-06-01T10:08:00Z
+order_1005,customer_204,return_3005,agent_002,585.04,374.1,home,item_not_as_described,True,APPROVED,False,86,2026-06-01T10:23:00Z
+order_1006,customer_300,return_3006,agent_101,2968.28,1855.12,luxury,item_not_as_described,False,APPROVED,False,30,2026-06-02T09:02:00Z
+order_1007,customer_301,return_3007,agent_005,1570.12,708.57,appliances,damaged_item,False,APPROVED,False,30,2026-06-02T09:27:00Z
+order_1008,customer_302,return_3008,agent_002,1568.21,1321.3,electronics,damaged_item,False,APPROVED,False,36,2026-06-02T09:49:00Z
+order_1009,customer_303,return_3009,agent_001,910.49,736.87,appliances,damaged_item,False,APPROVED,False,16,2026-06-02T10:15:00Z
+order_1010,customer_304,return_3010,agent_005,651.98,479.91,luxury,damaged_item,False,APPROVED,False,35,2026-06-02T10:40:00Z
+order_1011,customer_400,return_3011,agent_101,1213.2,1213.2,electronics,missing_accessory,False,APPROVED,False,25,2026-06-03T09:00:00Z
+order_1012,customer_401,return_3012,agent_005,1146.04,1146.04,appliances,damaged_item,True,APPROVED,True,61,2026-06-03T09:32:00Z
+order_1013,customer_402,return_3013,agent_005,1803.3,1803.3,luxury,changed_mind,False,APPROVED,False,60,2026-06-03T10:08:00Z
+order_1014,customer_403,return_3014,agent_001,2157.69,2157.69,luxury,changed_mind,True,APPROVED,False,39,2026-06-03T10:25:00Z
+order_1015,customer_404,return_3015,agent_005,949.24,949.24,appliances,damaged_item,False,APPROVED,False,38,2026-06-03T11:01:00Z
+order_1016,customer_500,return_3016,agent_101,472.24,299.92,fashion,item_not_as_described,False,APPROVED,False,2,2026-06-04T09:01:00Z
+order_1017,customer_501,return_3017,agent_102,462.92,420.02,home,item_not_as_described,True,APPROVED,False,6,2026-06-04T09:17:00Z
+order_1018,customer_502,return_3018,agent_102,163.81,135.58,clothing,changed_mind,True,APPROVED,False,1,2026-06-04T09:31:00Z
+order_1019,customer_503,return_3019,agent_101,2605.08,2552.17,luxury,damaged_item,True,APPROVED,False,5,2026-06-04T09:47:00Z
+order_1020,customer_504,return_3020,agent_101,1058.6,896.76,electronics,missing_accessory,False,APPROVED,False,3,2026-06-04T10:04:00Z
+order_1021,customer_600,return_3021,agent_005,1170.27,772.55,luxury,damaged_item,False,APPROVED,True,4,2026-06-05T09:00:00Z
+order_1022,customer_601,return_3022,agent_002,2318.51,1564.59,luxury,changed_mind,False,APPROVED,True,11,2026-06-05T09:29:00Z
+order_1023,customer_602,return_3023,agent_102,1808.83,1331.79,electronics,item_not_as_described,False,APPROVED,True,7,2026-06-05T09:50:00Z
+order_1024,customer_603,return_3024,agent_004,1697.4,1345.97,electronics,damaged_item,False,APPROVED,True,26,2026-06-05T10:11:00Z
+order_1025,customer_604,return_3025,agent_102,1596.67,1330.79,electronics,missing_accessory,False,APPROVED,True,25,2026-06-05T10:30:00Z
+order_1026,customer_900,return_3026,agent_003,28.76,14.42,clothing,wrong_size,True,APPROVED,False,20,2026-06-06T09:08:00Z
+order_1027,customer_900,return_3027,agent_002,601.06,430.7,fashion,changed_mind,False,APPROVED,False,31,2026-06-07T09:17:00Z
+order_1028,customer_900,return_3028,agent_003,131.37,125.29,fashion,item_not_as_described,True,APPROVED,False,37,2026-06-08T09:27:00Z
+order_1029,customer_900,return_3029,agent_004,307.12,209.57,electronics,missing_accessory,True,APPROVED,True,65,2026-06-09T09:42:00Z
+order_1030,customer_900,return_3030,agent_102,56.28,35.61,books,damaged_item,False,APPROVED,False,45,2026-06-10T09:52:00Z
+order_1031,customer_700,return_3031,agent_777,1065.95,881.61,appliances,damaged_item,False,APPROVED,True,22,2026-06-11T09:03:00Z
+order_1032,customer_701,return_3032,agent_777,16.66,16.26,books,damaged_item,True,APPROVED,False,31,2026-06-11T09:23:00Z
+order_1033,customer_702,return_3033,agent_777,854.18,492.36,home,damaged_item,False,APPROVED,False,13,2026-06-11T09:37:00Z
+order_1034,customer_703,return_3034,agent_777,1373.6,1141.21,electronics,item_not_as_described,True,APPROVED,False,35,2026-06-11T10:02:00Z
+order_1035,customer_704,return_3035,agent_777,282.07,135.4,sports,wrong_size,True,APPROVED,False,5,2026-06-11T10:13:00Z
+order_1036,customer_888,return_3036,agent_888,665.92,607.0,sports,item_not_as_described,False,APPROVED,False,27,2026-06-12T09:06:00Z
+order_1037,customer_888,return_3037,agent_888,1773.38,1161.28,electronics,item_not_as_described,False,APPROVED,False,10,2026-06-13T09:16:00Z
+order_1038,customer_888,return_3038,agent_888,1331.41,1158.5,electronics,not_working,True,APPROVED,False,4,2026-06-14T09:21:00Z
+order_1039,customer_888,return_3039,agent_888,1364.69,875.48,electronics,not_working,False,APPROVED,True,16,2026-06-15T09:32:00Z
+order_1040,customer_888,return_3040,agent_888,430.66,428.9,sports,item_not_as_described,False,APPROVED,False,24,2026-06-16T09:43:00Z
+order_1041,customer_999,return_3041,agent_999,1168.27,1019.25,electronics,item_not_as_described,False,APPROVED,True,4,2026-06-17T09:01:00Z
+order_1042,customer_999,return_3042,agent_999,1182.59,968.11,luxury,item_not_as_described,False,APPROVED,True,5,2026-06-18T09:10:00Z
+order_1043,customer_999,return_3043,agent_999,872.0,777.01,appliances,not_working,False,APPROVED,True,5,2026-06-19T09:19:00Z
+order_1044,customer_999,return_3044,agent_999,916.25,831.78,appliances,missing_part,False,APPROVED,True,8,2026-06-20T09:28:00Z
+order_1045,customer_999,return_3045,agent_999,1099.08,996.79,appliances,not_working,False,APPROVED,True,2,2026-06-21T09:37:00Z
+"""
 
 
 # --------------------------------------------------------------------------- #
@@ -574,11 +640,44 @@ class RefundDatasetGenerator:
         counts[scenario_ids[-1]] = fraud_total - assigned
         return counts
 
+    def _build_legacy_rows(self) -> List[GeneratedRow]:
+        """Parse the embedded legacy fixture into typed rows.
+
+        Rows are 5 per scenario in scenario order, so scenario_id = index // 5 + 1.
+        """
+        reader = csv.DictReader(io.StringIO(LEGACY_DATASET_CSV.strip()))
+        rows: List[GeneratedRow] = []
+        for index, raw in enumerate(reader):
+            scenario_id = index // 5 + 1
+            data = {
+                "order_id": raw["order_id"],
+                "customer_id": raw["customer_id"],
+                "return_id": raw["return_id"],
+                "support_agent_id": raw["support_agent_id"],
+                "order_amount": money(float(raw["order_amount"])),
+                "refund_amount": money(float(raw["refund_amount"])),
+                "product_category": raw["product_category"],
+                "return_reason": raw["return_reason"],
+                "evidence_provided": raw["evidence_provided"].strip().lower() == "true",
+                "decision": raw["decision"].strip().upper(),
+                "manual_override": raw["manual_override"].strip().lower() == "true",
+                "decision_time_minutes": int(raw["decision_time_minutes"]),
+                "timestamp": raw["timestamp"],
+            }
+            label = "normal" if scenario_id == 1 else "fraud"
+            rows.append(GeneratedRow(data=data, scenario_id=scenario_id, label=label))
+        return rows
+
     def generate(self) -> None:
-        fraud_total = round(self.total_rows * self.fraud_ratio)
-        normal_total = self.total_rows - fraud_total
+        # Legacy fixture rows are always included (backend tests depend on them).
+        legacy_rows = self._build_legacy_rows()
+        synthetic_total = max(0, self.total_rows - len(legacy_rows))
+
+        fraud_total = round(synthetic_total * self.fraud_ratio)
+        normal_total = synthetic_total - fraud_total
         counts = self._fraud_counts(fraud_total)
 
+        self.rows.extend(legacy_rows)
         self.generate_normal(normal_total)
         self.generate_high_value_no_evidence(counts[2])
         self.generate_full_expensive(counts[3])
