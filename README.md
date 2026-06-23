@@ -516,65 +516,11 @@ Known limitations for the current Week 2 version:
 
 <h2 align="center">Instructions for Running the Project</h2>
 
-Prerequisites:
+Detailed service-specific run instructions are maintained in each component README:
 
-* Docker;
-* Docker Compose;
-* available local ports for the frontend, gateway, backend services, PostgreSQL, RabbitMQ, and MinIO.
+* [Frontend Dashboard](./frontend/README.md#running-the-frontend);
+* [Upload Service](./backend/upload-service/README.md#running-the-upload-service);
+* [Relations Service](./backend/relations-service/README.md#running-the-relations-service);
+* [Scoring Service](./backend/scoring-service/README.md#running-the-scoring-service).
 
-Run the full project from the repository root when the project Docker Compose configuration is available:
-
-```bash
-docker compose up --build
-```
-
-Run it in the background:
-
-```bash
-docker compose up --build -d
-```
-
-Check running containers:
-
-```bash
-docker compose ps
-```
-
-Open the main local URLs:
-
-* Frontend dashboard: `http://localhost:3000`;
-* Backend gateway: `http://localhost:8080`;
-* RabbitMQ management UI: `http://localhost:15672`;
-* MinIO console: `http://localhost:9001`.
-
-Default local credentials:
-
-* RabbitMQ: `guest` / `guest`;
-* MinIO: `minioadmin` / `minioadmin`;
-* PostgreSQL: `postgres` / `postgres`, database `upload_db`.
-
-Useful API checks:
-
-```bash
-curl http://localhost:8080/api/datasets/health
-curl http://localhost:8080/api/scoring/health
-curl http://localhost:8080/api/scoring/datasets/demo/suspicious-approvals
-```
-
-View logs for the main application services:
-
-```bash
-docker compose logs -f frontend gateway upload-service relations-service scoring-service
-```
-
-Stop the project:
-
-```bash
-docker compose down
-```
-
-Stop the project and remove local persistent volumes:
-
-```bash
-docker compose down -v
-```
+For the full Docker Compose environment, use the deployment configuration provided for the current branch or environment and then follow the service health checks listed in the component README files.
