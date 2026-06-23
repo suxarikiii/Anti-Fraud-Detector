@@ -179,11 +179,18 @@ Column names are not the only part that may differ between companies. Some value
 
 ## Synthetic Dataset Scenario Coverage
 
-The synthetic dataset should include both normal and suspicious refund approval patterns.
+The synthetic dataset includes both normal and suspicious refund approval patterns.
 
-Each scenario is represented by 5 generated cases.
+By default the generator produces **~5000 rows** with a realistic class balance:
+**60% normal** refund handling and **40% suspicious/fraud** cases. Crucially, the
+clean dataset contains **both `APPROVED` and `DECLINED` decisions**, so that agent
+approval-rate signals are measurable (all-approved data makes
+`AGENT_HIGH_APPROVAL_RATE` impossible to detect).
 
-1. Normal refund approvals with evidence and reasonable timing
+The 40% fraud budget is spread across scenarios 2–9; scenario 1 is the normal
+background. Each scenario is guaranteed to be represented.
+
+1. Normal refund approvals with evidence and reasonable timing (includes declines)
 2. High-value refund approved without evidence
 3. Full-amount refund approved for expensive order
 4. Very fast approval by support agent
@@ -193,7 +200,42 @@ Each scenario is represented by 5 generated cases.
 8. Repeated agent-customer approval pattern
 9. Suspicious cluster: same agent + frequent customer returns + manual overrides
 
-The main clean dataset should not contain an extra `scenario` column because backend services expect only business fields. Scenario coverage is documented separately in `scenario_coverage.csv`.
+The main clean dataset must not contain an extra `scenario` column because backend
+services expect only business fields. Scenario, ground-truth label, and the rules
+each case is designed to trigger are documented separately (see below).
+
+### Generated Files
+
+| File | Purpose |
+|---|---|
+| `clean_refund_dataset.csv` | Backend-ready dataset, only normalized business columns |
+| `dataset_labels.csv` | Ground-truth: `scenario_id`, `scenario_name`, `label` (normal/fraud), `expected_rules`, `decision`. Used to evaluate scoring precision/recall. Not consumed by backend. |
+| `dirty_business_refund_dataset.csv` | Messy raw export, "business" schema |
+| `dirty_shopflow_refund_dataset.csv` | Messy raw export, US-style schema (slash dates, `$` money, `Y/N`) |
+| `dirty_retailhub_refund_dataset.csv` | Messy raw export, EU-style schema (dotted dates, comma decimals, `1/0`) |
+
+### Graph Density
+
+Customers are drawn from a reusable pool, so a single customer places many orders
+over time (`Customer --PLACED_ORDER--> Order` is one-to-many). Frequent returners,
+repeated agent-customer pairs, and suspicious clusters recur across the dataset
+instead of appearing as one-off hardcoded rows, giving the relations service real
+structure to detect.
+
+### Scoring Thresholds (assumed by the generator)
+
+The generator guarantees each scoring rule is triggerable using these thresholds,
+which must stay in sync with the scoring service:
+
+| Rule | Threshold used by generator |
+|---|---|
+| `HIGH_VALUE_REFUND` | `refund_amount >= 500` |
+| `FULL_AMOUNT_REFUND` | `refund_amount / order_amount >= 0.95` |
+| `FAST_APPROVAL` | `decision_time_minutes <= 5` |
+
+The validation harness (`validate_refund_dataset.py`) asserts that every rule is
+actually triggered, that the class balance holds, that `DECLINED` records exist,
+and that the dirty exports keep distinct, mappable schemas.
 
 ---
 
