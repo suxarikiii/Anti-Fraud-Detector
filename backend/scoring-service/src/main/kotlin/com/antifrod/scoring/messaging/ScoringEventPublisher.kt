@@ -1,5 +1,6 @@
 package com.antifrod.scoring.messaging
 
+import com.antifrod.scoring.config.RabbitMqConfig
 import com.antifrod.scoring.messaging.event.PipelineFailedEvent
 import com.antifrod.scoring.messaging.event.ScoringCompletedEvent
 import org.springframework.amqp.rabbit.core.RabbitTemplate
@@ -17,7 +18,7 @@ class ScoringEventPublisher(
     fun publishScoringCompleted(event: ScoringCompletedEvent) {
         rabbitTemplate.convertAndSend(
             exchange,
-            "refund.scoring.completed",
+            RabbitMqConfig.REFUND_SCORING_COMPLETED_ROUTING_KEY,
             event
         )
     }
@@ -25,7 +26,7 @@ class ScoringEventPublisher(
     fun publishPipelineFailed(event: PipelineFailedEvent) {
         rabbitTemplate.convertAndSend(
             exchange,
-            "pipeline.failed",
+            RabbitMqConfig.PIPELINE_FAILED_ROUTING_KEY,
             event
         )
     }
