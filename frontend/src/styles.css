@@ -453,6 +453,83 @@ select {
   animation: spin 0.75s linear infinite;
 }
 
+.button-spinner.dark {
+  border-color: rgba(0, 119, 255, 0.22);
+  border-top-color: var(--cui-primary);
+}
+
+.api-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(0, 119, 255, 0.2);
+  border-radius: 0.5rem;
+  background: rgba(0, 119, 255, 0.06);
+  color: var(--cui-body-color);
+  font-family: "MTS Compact", "MTS Text", Arial, sans-serif;
+  font-weight: 500;
+}
+
+.api-notice.warning {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(245, 158, 11, 0.1);
+  color: #8a4b00;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  gap: 0.45rem;
+  min-height: 150px;
+  padding: 1.5rem;
+  border: 1px dashed var(--cui-border-color);
+  border-radius: 0.5rem;
+  background: var(--cui-tertiary-bg);
+  color: var(--cui-secondary-color);
+  text-align: center;
+}
+
+.empty-state strong {
+  color: var(--cui-body-color);
+}
+
+.empty-state span {
+  max-width: 24rem;
+}
+
+.pagination-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  color: var(--cui-secondary-color);
+  font-family: "MTS Compact", "MTS Text", Arial, sans-serif;
+}
+
+.pagination-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.pagination-actions .btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+}
+
+.pagination-actions strong {
+  min-width: 3.75rem;
+  color: var(--cui-body-color);
+  text-align: center;
+}
+
 @keyframes document-pulse {
   0%,
   100% {
