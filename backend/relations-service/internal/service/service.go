@@ -2,10 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"relations-service/internal/domain"
@@ -24,6 +30,11 @@ type Service struct {
 	records   []domain.NormalizedReturnRecord
 }
 
+type Options struct {
+	DatasetID   string
+	DatasetPath string
+}
+
 type NormalizedDatasetEvent struct {
 	DatasetID   string `json:"datasetId"`
 	JobID       string `json:"jobId"`
@@ -39,10 +50,22 @@ type RelationsBuiltEvent struct {
 	PublishedAt    string `json:"publishedAt"`
 }
 
-func NewService(publisher RelationsBuiltPublisher) *Service {
+func NewService(publisher RelationsBuiltPublisher, options Options) *Service {
+	records, err := loadRecords(options)
+	if err != nil {
+		records = fallbackTestDataset()
+	}
+
 	return &Service{
 		publisher: publisher,
-		records:   week2TestDataset(),
+		records:   records,
+	}
+}
+
+func NewServiceWithRecords(publisher RelationsBuiltPublisher, records []domain.NormalizedReturnRecord) *Service {
+	return &Service{
+		publisher: publisher,
+		records:   records,
 	}
 }
 
@@ -216,6 +239,21 @@ func (s *Service) GetReturnFeatures(returnID string) (*domain.ReturnFeaturesResp
 	}, nil
 }
 
+func (s *Service) GetReturnFeaturesForDataset(datasetID, returnID string) (*domain.ReturnFeaturesResponse, error) {
+	record, ok := s.findRecordInDataset(datasetID, returnID)
+	if !ok {
+		return nil, ErrReturnNotFound
+	}
+
+	features := s.calculateFeatures(record)
+	return &domain.ReturnFeaturesResponse{
+		ReturnID:       record.ReturnID,
+		CustomerID:     record.CustomerID,
+		SupportAgentID: record.SupportAgentID,
+		Features:       features,
+	}, nil
+}
+
 func (s *Service) calculateFeatures(target domain.NormalizedReturnRecord) domain.RelationFeatures {
 	customerReturnCount := 0
 	customerApprovedRefundCount := 0
@@ -340,7 +378,147 @@ func (s *Service) findRecord(returnID string) (domain.NormalizedReturnRecord, bo
 	return domain.NormalizedReturnRecord{}, false
 }
 
-func week2TestDataset() []domain.NormalizedReturnRecord {
+func (s *Service) findRecordInDataset(datasetID, returnID string) (domain.NormalizedReturnRecord, bool) {
+	for _, record := range s.records {
+		if record.DatasetID == datasetID && record.ReturnID == returnID {
+			return record, true
+		}
+	}
+	return domain.NormalizedReturnRecord{}, false
+}
+
+func loadRecords(options Options) ([]domain.NormalizedReturnRecord, error) {
+	datasetID := options.DatasetID
+	if datasetID == "" {
+		datasetID = "demo"
+	}
+
+	for _, path := range candidateDatasetPaths(options.DatasetPath) {
+		records, err := loadRecordsFromCSV(datasetID, path)
+		if err == nil {
+			return records, nil
+		}
+	}
+
+	return nil, errors.New("normalized refund dataset was not found")
+}
+
+func candidateDatasetPaths(configuredPath string) []string {
+	paths := make([]string, 0, 4)
+	if configuredPath != "" {
+		paths = append(paths, configuredPath)
+	}
+
+	paths = append(paths,
+		"/data/clean_refund_dataset.csv",
+		filepath.Clean("../../data/clean_refund_dataset.csv"),
+		filepath.Clean("data/clean_refund_dataset.csv"),
+	)
+
+	return paths
+}
+
+func loadRecordsFromCSV(datasetID, path string) ([]domain.NormalizedReturnRecord, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	header, err := reader.Read()
+	if err != nil {
+		return nil, err
+	}
+
+	index := map[string]int{}
+	for i, name := range header {
+		index[name] = i
+	}
+
+	records := make([]domain.NormalizedReturnRecord, 0)
+	for {
+		row, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		record, err := parseNormalizedReturnRecord(datasetID, row, index)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+
+	if len(records) == 0 {
+		return nil, errors.New("normalized refund dataset is empty")
+	}
+
+	return records, nil
+}
+
+func parseNormalizedReturnRecord(datasetID string, row []string, index map[string]int) (domain.NormalizedReturnRecord, error) {
+	orderAmount, err := parseFloat(row, index, "order_amount")
+	if err != nil {
+		return domain.NormalizedReturnRecord{}, err
+	}
+	refundAmount, err := parseFloat(row, index, "refund_amount")
+	if err != nil {
+		return domain.NormalizedReturnRecord{}, err
+	}
+	manualOverride, err := parseBool(row, index, "manual_override")
+	if err != nil {
+		return domain.NormalizedReturnRecord{}, err
+	}
+	decisionTimeMinutes, err := parseInt(row, index, "decision_time_minutes")
+	if err != nil {
+		return domain.NormalizedReturnRecord{}, err
+	}
+
+	return domain.NormalizedReturnRecord{
+		DatasetID:       datasetID,
+		ReturnID:        readString(row, index, "return_id"),
+		CustomerID:      readString(row, index, "customer_id"),
+		OrderID:         readString(row, index, "order_id"),
+		SupportAgentID:  readString(row, index, "support_agent_id"),
+		ProductCategory: readString(row, index, "product_category"),
+		ReturnReason:    readString(row, index, "return_reason"),
+		DecisionID:      fmt.Sprintf("decision_%s", strings.TrimPrefix(readString(row, index, "return_id"), "return_")),
+		DecisionStatus:  strings.ToUpper(readString(row, index, "decision")),
+		RefundAmount:    refundAmount,
+		OrderAmount:     orderAmount,
+		ManualOverride:  manualOverride,
+		DecisionTimeMs:  decisionTimeMinutes * 60 * 1000,
+	}, nil
+}
+
+func readString(row []string, index map[string]int, column string) string {
+	i, ok := index[column]
+	if !ok || i >= len(row) {
+		return ""
+	}
+	return strings.TrimSpace(row[i])
+}
+
+func parseFloat(row []string, index map[string]int, column string) (float64, error) {
+	value := readString(row, index, column)
+	return strconv.ParseFloat(value, 64)
+}
+
+func parseBool(row []string, index map[string]int, column string) (bool, error) {
+	value := readString(row, index, column)
+	return strconv.ParseBool(value)
+}
+
+func parseInt(row []string, index map[string]int, column string) (int, error) {
+	value := readString(row, index, column)
+	return strconv.Atoi(value)
+}
+
+func fallbackTestDataset() []domain.NormalizedReturnRecord {
 	return []domain.NormalizedReturnRecord{
 		{
 			DatasetID:       "demo",

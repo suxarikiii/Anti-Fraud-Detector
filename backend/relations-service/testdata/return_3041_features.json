@@ -1,0 +1,26 @@
+{
+  "returnId": "return_3041",
+  "customerId": "customer_999",
+  "supportAgentId": "agent_999",
+  "features": {
+    "customerReturnCount": 5,
+    "customerApprovedRefundCount": 5,
+    "agentApprovalRate": 1,
+    "agentManualOverrideRate": 1,
+    "agentHighValueApprovalCount": 5,
+    "customerAgentPairCount": 5,
+    "agentCustomerInteractionCount": 5,
+    "categoryRefundRate": 0.27,
+    "refundAmountRatio": 0.87,
+    "similarReturnsCount": 0,
+    "sameReasonRefundCount": 13,
+    "clusterSize": 13,
+    "strongestRelationType": "SAME_REASON_PATTERN",
+    "topRelatedReturns": [
+      "return_3042",
+      "return_3043",
+      "return_3044",
+      "return_3045"
+    ]
+  }
+}

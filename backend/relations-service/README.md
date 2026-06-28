@@ -6,19 +6,20 @@
 
 ---
 
-<h2 align="center">Week 2 Status</h2>
+<h2 align="center">Week 4 Status</h2>
 
-Week 2 turns the Week 1 skeleton into the first source of relation features for the Scoring Service.
+Week 4 stabilizes the relation feature contract for Scoring Service and frontend integration.
 
 What works now:
 
 * service runs locally and in root `docker-compose.yml`;
 * health endpoint is available on `:8082`;
-* `/api/relations/returns/{returnId}/features` calculates features from an in-memory normalized test dataset;
-* supported demo return IDs: `return_3041`, `return_3006`;
+* `/api/relations/returns/{returnId}/features` calculates features from normalized refund records;
+* `/api/relations/datasets/{datasetId}/returns/{returnId}/features` provides a dataset-aware feature endpoint;
+* all demo return IDs from `data/clean_refund_dataset.csv` are supported: `return_3001` through `return_3045`;
 * RabbitMQ consumer stub listens for `dataset.normalized` when `RABBITMQ_ENABLED=true`;
 * rebuild flow publishes `refund.relations.built` with `datasetId`, `jobId`, `relationsCount`, and `featuresCount`;
-* Graph DB is intentionally left for Week 3 integration.
+* Graph DB is intentionally left for future integration.
 
 ---
 
@@ -41,15 +42,15 @@ refund.scoring.completed
 
 Relations Service expects normalized refund records produced by ML / Normalization Service.
 
-Week 2 canonical record shape:
+Week 4 canonical record shape:
 
 ```json
 {
   "datasetId": "demo",
   "returnId": "return_3041",
-  "customerId": "customer_880",
+  "customerId": "customer_999",
   "orderId": "order_9101",
-  "supportAgentId": "agent_017",
+  "supportAgentId": "agent_999",
   "productCategory": "electronics",
   "returnReason": "item_not_as_described",
   "decisionId": "decision_7001",
@@ -61,7 +62,7 @@ Week 2 canonical record shape:
 }
 ```
 
-Required fields for Week 2 feature generation:
+Required fields for feature generation:
 
 * `datasetId: string`
 * `returnId: string`
@@ -78,7 +79,7 @@ Required fields for Week 2 feature generation:
 
 <h2 align="center">Feature Schema</h2>
 
-The main Week 2 scoring fields are:
+The main scoring fields are:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -107,23 +108,23 @@ Example:
 ```json
 {
   "returnId": "return_3041",
-  "customerId": "customer_880",
-  "supportAgentId": "agent_017",
+  "customerId": "customer_999",
+  "supportAgentId": "agent_999",
   "features": {
-    "customerReturnCount": 3,
-    "customerApprovedRefundCount": 2,
-    "agentApprovalRate": 0.75,
-    "agentManualOverrideRate": 0.5,
-    "agentHighValueApprovalCount": 2,
-    "customerAgentPairCount": 2,
-    "agentCustomerInteractionCount": 2,
-    "categoryRefundRate": 0.8,
-    "refundAmountRatio": 0.81,
-    "similarReturnsCount": 2,
-    "sameReasonRefundCount": 3,
-    "clusterSize": 4,
-    "strongestRelationType": "AGENT_DECISION_PATTERN",
-    "topRelatedReturns": ["return_3006", "return_3110"]
+    "customerReturnCount": 5,
+    "customerApprovedRefundCount": 5,
+    "agentApprovalRate": 1,
+    "agentManualOverrideRate": 1,
+    "agentHighValueApprovalCount": 5,
+    "customerAgentPairCount": 5,
+    "agentCustomerInteractionCount": 5,
+    "categoryRefundRate": 0.27,
+    "refundAmountRatio": 0.87,
+    "similarReturnsCount": 0,
+    "sameReasonRefundCount": 13,
+    "clusterSize": 13,
+    "strongestRelationType": "SAME_REASON_PATTERN",
+    "topRelatedReturns": ["return_3042", "return_3043", "return_3044", "return_3045"]
   }
 }
 ```
@@ -156,13 +157,22 @@ GET  /api/relations/agents/{agentId}/summary
 GET  /api/relations/returns/{returnId}/features
 ```
 
-Week 2 demo:
+Week 4 smoke demo:
 
 ```bash
 curl http://localhost:8082/api/relations/health
 curl http://localhost:8082/api/relations/returns/return_3041/features
+curl http://localhost:8082/api/relations/datasets/demo/returns/return_3041/features
 curl http://localhost:8082/api/relations/returns/return_3006/features
 curl -X POST http://localhost:8082/api/relations/datasets/demo/rebuild
+```
+
+Unknown return IDs return `404 Not Found`.
+
+Sample response artifact:
+
+```text
+backend/relations-service/testdata/return_3041_features.json
 ```
 
 ---
@@ -206,8 +216,8 @@ Output event:
 {
   "datasetId": "demo",
   "jobId": "job_123",
-  "relationsCount": 35,
-  "featuresCount": 5,
+  "relationsCount": 315,
+  "featuresCount": 45,
   "publishedAt": "2026-06-22T10:00:05Z"
 }
 ```
@@ -246,11 +256,50 @@ SupportAgent --REPEATED_APPROVAL_PATTERN--> Customer
 
 ---
 
-<h2 align="center">Week 3 Integration</h2>
+<h2 align="center">Relations-to-Scoring Integration</h2>
 
-Graph DB is not connected in Week 2.
+Scoring Service can map the response from:
 
-Week 3 should replace or extend the in-memory builder with:
+```text
+GET /api/relations/datasets/{datasetId}/returns/{returnId}/features
+```
+
+The stable fields for scoring are:
+
+```text
+customerReturnCount
+agentApprovalRate
+customerAgentPairCount
+clusterSize
+refundAmountRatio
+strongestRelationType
+topRelatedReturns
+similarReturnsCount
+sameReasonRefundCount
+```
+
+Demo high-risk case:
+
+```text
+return_3041
+```
+
+Why it is useful for investigation:
+
+* `customerReturnCount` shows frequent returns by the same customer;
+* `customerAgentPairCount` shows repeated customer-agent interaction;
+* `agentApprovalRate` shows unusual support agent approval behavior;
+* `strongestRelationType` and `topRelatedReturns` explain the relation pattern to an analyst.
+
+RabbitMQ integration is available as a local/demo stub through `POST /api/relations/datasets/{datasetId}/rebuild` and the `refund.relations.built` publisher. Full end-to-end scoring consumption remains a team integration point with Scoring Service.
+
+---
+
+<h2 align="center">Graph DB Integration</h2>
+
+Graph DB is not connected in Week 4.
+
+Future work should replace or extend the CSV/in-memory builder with:
 
 1. loading normalized records from PostgreSQL / object storage;
 2. writing vertices and edges to Graph DB;

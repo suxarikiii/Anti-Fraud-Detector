@@ -109,6 +109,33 @@ func (h *Handler) ReturnFeaturesHandler(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, features)
 }
 
+func (h *Handler) DatasetReturnFeaturesHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datasetID := vars["datasetId"]
+	returnID := vars["returnId"]
+	if datasetID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id is required")
+		return
+	}
+	if returnID == "" {
+		writeError(w, http.StatusBadRequest, "return id is required")
+		return
+	}
+
+	features, err := h.Service.GetReturnFeaturesForDataset(datasetID, returnID)
+	if err != nil {
+		if errors.Is(err, service.ErrReturnNotFound) {
+			writeError(w, http.StatusNotFound, "return %s not found in dataset %s", returnID, datasetID)
+			return
+		}
+		h.Logger.Error("dataset return features error", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get return features: %v", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, features)
+}
+
 func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
