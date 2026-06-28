@@ -68,6 +68,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: datasets
       MINIO_SECURE: "false"
+      RABBITMQ_EXCHANGE: "pipeline.exchange"
     depends_on:
       postgres:
         condition: service_healthy
