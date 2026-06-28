@@ -15,6 +15,7 @@ const defaultEnvPath = ".env"
 type Config struct {
 	Server ServerConfig
 	Rabbit RabbitConfig
+	Data   DataConfig
 }
 
 type ServerConfig struct {
@@ -29,6 +30,11 @@ type RabbitConfig struct {
 	NormalizedQueue          string
 	NormalizedRoutingKey     string
 	RelationsBuiltRoutingKey string
+}
+
+type DataConfig struct {
+	DatasetID   string
+	DatasetPath string
 }
 
 func Load() (*Config, error) {
@@ -48,6 +54,10 @@ func Load() (*Config, error) {
 			NormalizedQueue:          getEnv("RABBITMQ_NORMALIZED_QUEUE", "relations.dataset-normalized.queue"),
 			NormalizedRoutingKey:     getEnv("RABBITMQ_NORMALIZED_ROUTING_KEY", "dataset.normalized"),
 			RelationsBuiltRoutingKey: getEnv("RABBITMQ_RELATIONS_BUILT_ROUTING_KEY", "refund.relations.built"),
+		},
+		Data: DataConfig{
+			DatasetID:   getEnv("RELATIONS_DATASET_ID", "demo"),
+			DatasetPath: getEnv("RELATIONS_DATASET_PATH", ""),
 		},
 	}, nil
 }

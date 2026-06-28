@@ -163,21 +163,53 @@ Example agent risk summary response:
 ```text
 GET /api/relations/health
 GET /api/relations/returns/{returnId}
-GET /api/relations/customers/{customerId}
-GET /api/relations/agents/{agentId}
+GET /api/relations/returns/{returnId}/features
+GET /api/relations/datasets/{datasetId}/returns/{returnId}/features
+GET /api/relations/customers/{customerId}/history
+GET /api/relations/agents/{agentId}/summary
 POST /api/relations/datasets/{datasetId}/rebuild
 ```
 
-Example relation summary response:
+Stable relation feature response for Scoring Service:
 
 ```json
 {
-  "returnId": "return_123",
-  "customerReturnCount": 8,
-  "agentApprovalRate": 0.94,
-  "customerAgentPairCount": 5,
-  "clusterSize": 8,
-  "strongestRelationType": "REPEATED_AGENT_CUSTOMER_PAIR"
+  "returnId": "return_3041",
+  "customerId": "customer_999",
+  "supportAgentId": "agent_999",
+  "features": {
+    "customerReturnCount": 5,
+    "customerApprovedRefundCount": 5,
+    "agentApprovalRate": 1,
+    "agentManualOverrideRate": 1,
+    "agentHighValueApprovalCount": 5,
+    "customerAgentPairCount": 5,
+    "agentCustomerInteractionCount": 5,
+    "categoryRefundRate": 0.27,
+    "refundAmountRatio": 0.87,
+    "similarReturnsCount": 0,
+    "sameReasonRefundCount": 13,
+    "clusterSize": 13,
+    "strongestRelationType": "SAME_REASON_PATTERN",
+    "topRelatedReturns": [
+      "return_3042",
+      "return_3043",
+      "return_3044",
+      "return_3045"
+    ]
+  }
+}
+```
+
+Example rebuild response:
+
+```json
+{
+  "datasetId": "demo",
+  "jobId": "relations-job-demo",
+  "status": "RELATIONS_REBUILD_STARTED",
+  "relationsCount": 315,
+  "featuresCount": 45
 }
 ```
 
