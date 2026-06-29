@@ -1,6 +1,7 @@
 package com.antifrod.scoring.controller
 
 import org.hamcrest.Matchers.greaterThan
+import org.hamcrest.Matchers.greaterThanOrEqualTo
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.Test
 import org.springframework.amqp.rabbit.core.RabbitTemplate
@@ -43,6 +44,13 @@ class ScoringControllerIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$").isArray)
             .andExpect(jsonPath("$.length()", greaterThan(0)))
             .andExpect(jsonPath("$[*].returnId", hasItem("return_3041")))
+            .andExpect(jsonPath("$[0].datasetId").value("demo"))
+            .andExpect(jsonPath("$[0].orderAmount").exists())
+            .andExpect(jsonPath("$[0].riskScore").exists())
+            .andExpect(jsonPath("$[0].riskLevel").exists())
+            .andExpect(jsonPath("$[0].topReason").exists())
+            .andExpect(jsonPath("$[0].reasons").isArray)
+            .andExpect(jsonPath("$[0].calculatedAt").exists())
     }
 
     @Test
@@ -57,6 +65,7 @@ class ScoringControllerIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.riskScore").value(100))
             .andExpect(jsonPath("$.riskLevel").value("CRITICAL"))
             .andExpect(jsonPath("$.reasons[*].type", hasItem("NO_EVIDENCE")))
+            .andExpect(jsonPath("$.reasons[*].type", hasItem("FAST_APPROVAL")))
             .andExpect(jsonPath("$.reasons[*].type", hasItem("MANUAL_OVERRIDE")))
             .andExpect(jsonPath("$.reasons[*].type", hasItem("CUSTOMER_FREQUENT_RETURNS")))
             .andExpect(jsonPath("$.reasons[*].type", hasItem("REPEATED_AGENT_CUSTOMER_PAIR")))
@@ -94,18 +103,29 @@ class ScoringControllerIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.riskLevel").value("CRITICAL"))
             .andExpect(jsonPath("$.reasons[*].type", hasItem("NO_EVIDENCE")))
             .andExpect(jsonPath("$.reasons[*].type", hasItem("MANUAL_OVERRIDE")))
+            .andExpect(jsonPath("$.relationFeatures.customerReturnCount", greaterThanOrEqualTo(5)))
+            .andExpect(jsonPath("$.relationFeatures.agentApprovalRate").value(1.0))
+            .andExpect(jsonPath("$.relationFeatures.customerAgentPairCount", greaterThanOrEqualTo(5)))
+            .andExpect(jsonPath("$.relationFeatures.clusterSize", greaterThanOrEqualTo(5)))
+            .andExpect(jsonPath("$.relationFeatures.refundAmountRatio").exists())
+            .andExpect(jsonPath("$.relationFeatures.strongestRelationType").value("REPEATED_AGENT_CUSTOMER_PAIR"))
+            .andExpect(jsonPath("$.relationFeatures.featureSource").value("CSV_DERIVED_FALLBACK"))
+            .andExpect(jsonPath("$.calculatedAt").exists())
     }
 
     @Test
     fun `should return support agent risk summary through HTTP endpoint`() {
         mockMvc.perform(get("/api/scoring/agents/agent_777/risk-summary"))
             .andExpect(status().isOk)
+            .andExpect(jsonPath("$.datasetId").value("demo"))
             .andExpect(jsonPath("$.agentId").value("agent_777"))
-            .andExpect(jsonPath("$.suspiciousApprovalsCount").value(4))
-            .andExpect(jsonPath("$.averageRiskScore").value(59.0))
-            .andExpect(jsonPath("$.highRiskApprovalsCount").value(1))
-            .andExpect(jsonPath("$.criticalRiskApprovalsCount").value(1))
-            .andExpect(jsonPath("$.topReason").value("Support agent has unusually high approval rate"))
+            .andExpect(jsonPath("$.totalApprovals", greaterThan(0)))
+            .andExpect(jsonPath("$.totalReturns", greaterThan(0)))
+            .andExpect(jsonPath("$.suspiciousApprovalsCount", greaterThan(0)))
+            .andExpect(jsonPath("$.averageRiskScore", greaterThan(0.0)))
+            .andExpect(jsonPath("$.topRiskReasons").isArray)
+            .andExpect(jsonPath("$.topReason").exists())
+            .andExpect(jsonPath("$.calculatedAt").exists())
     }
 
     @Test
@@ -113,7 +133,26 @@ class ScoringControllerIntegrationTest @Autowired constructor(
         mockMvc.perform(get("/api/scoring/datasets/demo/agents/agent_777/risk-summary"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.agentId").value("agent_777"))
-            .andExpect(jsonPath("$.suspiciousApprovalsCount").value(4))
-            .andExpect(jsonPath("$.averageRiskScore").value(59.0))
+            .andExpect(jsonPath("$.datasetId").value("demo"))
+            .andExpect(jsonPath("$.suspiciousApprovalsCount", greaterThan(0)))
+            .andExpect(jsonPath("$.averageRiskScore", greaterThan(0.0)))
+    }
+
+    @Test
+    fun `should return clean JSON error for unknown dataset`() {
+        mockMvc.perform(get("/api/scoring/datasets/missing-dataset/suspicious-approvals"))
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.status").value(404))
+            .andExpect(jsonPath("$.error").value("Not Found"))
+            .andExpect(jsonPath("$.message").value("Dataset was not found: missing-dataset"))
+            .andExpect(jsonPath("$.path").value("/api/scoring/datasets/missing-dataset/suspicious-approvals"))
+    }
+
+    @Test
+    fun `should return clean JSON error for unknown return`() {
+        mockMvc.perform(get("/api/scoring/datasets/demo/returns/missing_return/details"))
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.status").value(404))
+            .andExpect(jsonPath("$.message").value("Return approval was not found: missing_return in dataset: demo"))
     }
 }

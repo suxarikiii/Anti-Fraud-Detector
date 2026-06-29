@@ -1,9 +1,9 @@
 package com.antifrod.scoring.config
 
 import org.springframework.amqp.core.Queue
-import org.springframework.amqp.core.Binding
-import org.springframework.amqp.core.BindingBuilder
-import org.springframework.amqp.core.TopicExchange
+import org.springframework.amqp.rabbit.connection.ConnectionFactory
+import org.springframework.amqp.rabbit.core.RabbitAdmin
+import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
@@ -18,23 +18,19 @@ class RabbitMqConfig {
     }
 
     @Bean
-    fun pipelineExchange(): TopicExchange {
-        return TopicExchange("pipeline.exchange")
-    }
-
-    @Bean
     fun relationsBuiltQueue(): Queue {
         return Queue(REFUND_RELATIONS_BUILT_QUEUE, true)
     }
 
     @Bean
-    fun relationsBuiltBinding(
-        relationsBuiltQueue: Queue,
-        pipelineExchange: TopicExchange
-    ): Binding {
-        return BindingBuilder
-            .bind(relationsBuiltQueue)
-            .to(pipelineExchange)
-            .with("refund.relations.built")
+    fun rabbitAdmin(connectionFactory: ConnectionFactory): RabbitAdmin {
+        return RabbitAdmin(connectionFactory).also { admin ->
+            admin.setAutoStartup(true)
+        }
+    }
+
+    @Bean
+    fun jsonMessageConverter(): Jackson2JsonMessageConverter {
+        return Jackson2JsonMessageConverter()
     }
 }

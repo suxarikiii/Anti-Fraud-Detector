@@ -42,15 +42,25 @@ Example suspicious approvals response:
 ```json
 [
   {
+    "datasetId": "demo",
     "returnId": "return_123",
     "orderId": "order_456",
     "customerId": "customer_789",
     "supportAgentId": "agent_001",
     "refundAmount": 249.99,
+    "orderAmount": 299.99,
     "decision": "APPROVED",
     "riskScore": 84,
     "riskLevel": "HIGH",
-    "topReason": "Refund approved without evidence for a high-value order"
+    "topReason": "Refund approved without evidence for a high-value order",
+    "reasons": [
+      {
+        "type": "NO_EVIDENCE",
+        "message": "Refund was approved without evidence for this return request.",
+        "scoreImpact": 25
+      }
+    ],
+    "calculatedAt": "2026-06-01T10:15:00Z"
   }
 ]
 ```
@@ -70,7 +80,7 @@ Example return risk response:
   "reasons": [
     {
       "type": "NO_EVIDENCE",
-      "message": "Refund was approved without required evidence",
+      "message": "Refund was approved without evidence for this return request.",
       "scoreImpact": 25
     },
     {
@@ -79,6 +89,15 @@ Example return risk response:
       "scoreImpact": 20
     }
   ],
+  "relationFeatures": {
+    "customerReturnCount": 5,
+    "agentApprovalRate": 1,
+    "customerAgentPairCount": 5,
+    "clusterSize": 5,
+    "refundAmountRatio": 0.87,
+    "strongestRelationType": "REPEATED_AGENT_CUSTOMER_PAIR",
+    "featureSource": "CSV_DERIVED_FALLBACK"
+  },
   "calculatedAt": "2026-06-01T10:15:00Z"
 }
 ```
@@ -149,12 +168,38 @@ Example agent risk summary response:
 
 ```json
 {
-  "agentId": "agent_777",
-  "suspiciousApprovalsCount": 4,
-  "averageRiskScore": 59.0,
-  "highRiskApprovalsCount": 1,
-  "criticalRiskApprovalsCount": 1,
-  "topReason": "Support agent has unusually high approval rate"
+  "datasetId": "demo",
+  "agentId": "agent_999",
+  "totalApprovals": 5,
+  "totalReturns": 5,
+  "suspiciousApprovalsCount": 5,
+  "highRiskCount": 0,
+  "criticalRiskCount": 5,
+  "averageRiskScore": 100.0,
+  "approvalRate": 1,
+  "topRiskReasons": [
+    {
+      "type": "NO_EVIDENCE",
+      "message": "Refund was approved without evidence for this return request.",
+      "scoreImpact": 25
+    }
+  ],
+  "highRiskApprovalsCount": 0,
+  "criticalRiskApprovalsCount": 5,
+  "topReason": "Refund was approved without evidence for this return request.",
+  "calculatedAt": "2026-06-01T10:15:00Z"
+}
+```
+
+Example clean error response:
+
+```json
+{
+  "status": 404,
+  "error": "Not Found",
+  "message": "Return approval was not found: missing_return in dataset: demo",
+  "path": "/api/scoring/datasets/demo/returns/missing_return/details",
+  "timestamp": "2026-06-01T10:15:00Z"
 }
 ```
 

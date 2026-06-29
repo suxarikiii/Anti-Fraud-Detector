@@ -4,10 +4,13 @@ server:
 spring:
   application:
     name: scoring-service
+  rabbitmq:
+    listener:
+      simple:
+        missing-queues-fatal: false
 
 management:
   endpoints:
     web:
       exposure:
         include: health, info
-

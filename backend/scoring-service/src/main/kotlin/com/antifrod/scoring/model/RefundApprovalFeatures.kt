@@ -14,5 +14,7 @@ data class RefundApprovalFeatures(
     val agentApprovalRate: Double,
     val customerAgentPairCount: Int,
 
-    val clusterSize: Int
+    val clusterSize: Int,
+    val strongestRelationType: String,
+    val featureSource: String
 )
