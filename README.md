@@ -104,7 +104,7 @@ flowchart LR
 
     REL --> GDB[(Graph DB<br/>Neo4j / ArangoDB / other)]
 
-    UPLOAD -->|publish: dataset.uploaded| MQ[(RabbitMQ Direct Exchange)]
+    UPLOAD -->|publish: dataset.uploaded| MQ[(RabbitMQ Topic Exchange)]
 
     MQ -->|consume: dataset.uploaded| ML[ML / Normalization Service<br/>Anya]
     ML --> PG
@@ -223,7 +223,7 @@ flowchart LR
   </tr>
   <tr>
     <td align="center"><b>Messaging</b></td>
-    <td align="center">RabbitMQ with Direct Exchange</td>
+    <td align="center">RabbitMQ with Topic Exchange</td>
   </tr>
   <tr>
     <td align="center"><b>Deployment</b></td>

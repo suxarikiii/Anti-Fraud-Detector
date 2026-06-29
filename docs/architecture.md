@@ -28,7 +28,7 @@ flowchart LR
 
     REL --> GDB[(Graph DB<br/>Neo4j / ArangoDB / other)]
 
-    UPLOAD -->|publish: dataset.uploaded| MQ[(RabbitMQ Direct Exchange)]
+    UPLOAD -->|publish: dataset.uploaded| MQ[(RabbitMQ Topic Exchange)]
 
     MQ -->|consume: dataset.uploaded| ML[ML / Normalization Service<br/>Anya]
     ML --> PG
@@ -55,7 +55,7 @@ flowchart LR
 | Graph / Relations Service | Builds refund relation graph data and extracts relationship features for scoring. |
 | Scoring Service | Calculates refund approval risk score, risk level, and explainable risk reasons. |
 | PostgreSQL | Stores datasets, jobs, normalized entities, relation features, risk scores, and explanations. |
-| RabbitMQ Direct Exchange | Connects backend processing stages through domain events. |
+| RabbitMQ Topic Exchange | Connects backend processing stages through domain events. |
 | Graph DB | Stores customer, order, return request, support agent, decision, and product category relationships. |
 
 <h2 align="center">Backend Pipeline</h2>

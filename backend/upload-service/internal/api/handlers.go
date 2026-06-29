@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,6 +34,11 @@ type response struct {
 	Status    string      `json:"status,omitempty"`
 }
 
+type updateStatusRequest struct {
+	Status       string `json:"status"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
 func (h *Handler) HealthHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "UP", "service": "upload-service"})
 }
@@ -53,6 +59,11 @@ func (h *Handler) UploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	datasetID, jobID, err := h.Service.UploadDataset(r.Context(), bytes.NewReader(buffer), int64(len(buffer)), header.Filename)
 	if err != nil {
+		var invalidUpload *service.InvalidUploadError
+		if errors.As(err, &invalidUpload) {
+			writeError(w, http.StatusBadRequest, invalidUpload.Message)
+			return
+		}
 		h.Logger.Error("upload service error", "error", err)
 		writeError(w, http.StatusInternalServerError, "upload error: %v", err)
 		return
@@ -109,6 +120,35 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.Logger.Error("status lookup error", "error", err)
 		writeError(w, http.StatusNotFound, "job not found: %v", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (h *Handler) UpdateStatusHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	jobID, err := uuid.Parse(vars["jobId"])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+
+	var request updateStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid status update body")
+		return
+	}
+
+	status, err := h.Service.UpdateAnalysisStatus(r.Context(), jobID, request.Status, request.ErrorMessage)
+	if err != nil {
+		var invalidStatus *service.InvalidUploadError
+		if errors.As(err, &invalidStatus) {
+			writeError(w, http.StatusBadRequest, invalidStatus.Message)
+			return
+		}
+		h.Logger.Error("status update error", "error", err)
+		writeError(w, http.StatusNotFound, "failed to update job status: %v", err)
 		return
 	}
 

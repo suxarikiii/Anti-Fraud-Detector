@@ -86,6 +86,7 @@ func (c *Container) Router() http.Handler {
 	router.HandleFunc("/api/datasets/{datasetId}/preview", c.Handler.PreviewHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/analysis/{datasetId}/start", c.Handler.StartAnalysisHandler).Methods(http.MethodPost)
 	router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.StatusHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.UpdateStatusHandler).Methods(http.MethodPatch)
 
 	// serve OpenAPI spec for Swagger UI
 	router.HandleFunc("/api/docs/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {

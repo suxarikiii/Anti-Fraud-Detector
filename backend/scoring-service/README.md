@@ -17,7 +17,7 @@ It is responsible for:
 
 ```mermaid
 flowchart TD
-    A[Graph / Relations Service] -->|publish refund.relations.built| B[RabbitMQ Direct Exchange]
+    A[Graph / Relations Service] -->|publish refund.relations.built| B[RabbitMQ Topic Exchange]
     B -->|consume refund.relations.built| C[Scoring Service]
 
     C --> D[Read refund relation features]
