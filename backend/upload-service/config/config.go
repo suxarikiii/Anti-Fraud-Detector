@@ -65,7 +65,7 @@ func Load() (*Config, error) {
 		},
 		Rabbit: RabbitConfig{
 			URL:      getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
-			Exchange: getEnv("RABBITMQ_EXCHANGE", "dataset.events"),
+			Exchange: getEnv("RABBITMQ_EXCHANGE", "pipeline.exchange"),
 		},
 		MinIO: MinioConfig{
 			Endpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),

@@ -1,6 +1,6 @@
 <h1 align="center">RabbitMQ Events</h1>
 
-Backend services communicate asynchronously through a RabbitMQ direct exchange.
+Backend services communicate asynchronously through the RabbitMQ topic exchange `pipeline.exchange`.
 
 <h2 align="center">dataset.uploaded</h2>
 
@@ -15,6 +15,9 @@ Payload:
   "datasetId": "dataset_123",
   "jobId": "job_456",
   "filename": "refund_approvals_dataset.csv",
+  "filePath": "datasets/dataset_123.csv",
+  "fileType": "csv",
+  "uploadedAt": "2026-06-01T10:00:00Z",
   "timestamp": "2026-06-01T10:00:00Z"
 }
 ```

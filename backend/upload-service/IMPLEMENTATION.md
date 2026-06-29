@@ -1,7 +1,8 @@
 ### Upload Service
 
-Upload Service accepts CSV datasets, stores raw files in MinIO, creates dataset/job records in
-PostgreSQL, returns CSV previews, and starts the analysis flow by publishing `dataset.uploaded`.
+Upload Service accepts refund CSV datasets, validates the uploaded file, stores raw files in MinIO,
+creates dataset/job records in PostgreSQL, returns CSV previews, and starts the analysis flow by
+publishing `dataset.uploaded`.
 
 ### Run
 
@@ -94,10 +95,45 @@ Expected after start:
 ```json
 {
   "id": "<uuid>",
+  "jobId": "<uuid>",
   "datasetId": "<uuid>",
   "status": "NORMALIZING",
-  "currentStep": "NORMALIZING"
+  "currentStep": "NORMALIZING",
+  "message": "Normalizing CSV columns and refund records.",
+  "progressPercent": 20,
+  "stages": [
+    {
+      "status": "UPLOADED",
+      "message": "Dataset uploaded and ready to start analysis.",
+      "state": "completed"
+    },
+    {
+      "status": "NORMALIZING",
+      "message": "Normalizing CSV columns and refund records.",
+      "state": "current"
+    }
+  ]
 }
+```
+
+Update status manually during local demo:
+
+```bash
+curl -s -X PATCH http://localhost:8080/api/analysis/<jobId>/status \
+  -H "Content-Type: application/json" \
+  -d '{"status":"SCORING"}'
+```
+
+Supported statuses:
+
+```text
+UPLOADED
+NORMALIZING
+NORMALIZED
+BUILDING_RELATIONS
+SCORING
+COMPLETED
+FAILED
 ```
 
 ### Flow Notes
@@ -105,8 +141,13 @@ Expected after start:
 `POST /api/datasets/upload` creates one `analysis_jobs` row in `UPLOADED`.
 
 `POST /api/analysis/{datasetId}/start` reuses that row, publishes one `dataset.uploaded` event with
-`datasetId`, `jobId`, `filePath`, `fileType`, and `uploadedAt`, then updates the job to `NORMALIZING`.
+`datasetId`, `jobId`, `filename`, `filePath`, `fileType`, `uploadedAt`, and `timestamp`, then updates
+the job to `NORMALIZING`.
 Calling start again for the same dataset returns the existing job id instead of creating another job.
+
+Uploaded CSV validation checks `.csv` extension, empty files, required refund columns, duplicate or
+empty headers, inconsistent row length, required empty cells, numeric fields, and supported timestamp
+formats. Both the clean canonical dataset and the dirty business-column dataset are accepted.
 
 ### Infrastructure Checks
 
@@ -132,7 +173,7 @@ login: guest
 password: guest
 ```
 
-Open exchange `dataset.events`; `dataset.uploaded` messages are published when analysis starts.
+Open exchange `pipeline.exchange`; `dataset.uploaded` messages are published when analysis starts.
 
 MinIO:
 

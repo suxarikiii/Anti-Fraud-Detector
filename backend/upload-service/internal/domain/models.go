@@ -6,6 +6,16 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	AnalysisStatusUploaded          = "UPLOADED"
+	AnalysisStatusNormalizing       = "NORMALIZING"
+	AnalysisStatusNormalized        = "NORMALIZED"
+	AnalysisStatusBuildingRelations = "BUILDING_RELATIONS"
+	AnalysisStatusScoring           = "SCORING"
+	AnalysisStatusCompleted         = "COMPLETED"
+	AnalysisStatusFailed            = "FAILED"
+)
+
 type Dataset struct {
 	ID               uuid.UUID `json:"id"`
 	Name             string    `json:"name"`

@@ -33,7 +33,9 @@ type Container struct {
 }
 
 func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
-	if err := migrations.Run(cfg.DB.URL); err != nil {
+	if err := retryDependency(logger, "postgres migrations", func() error {
+		return migrations.Run(cfg.DB.URL)
+	}); err != nil {
 		return nil, fmt.Errorf("migrations failed: %w", err)
 	}
 
@@ -45,7 +47,10 @@ func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	if err := db.PingContext(context.Background()); err != nil {
+	if err := retryDependency(logger, "postgres ping", func() error {
+		return db.PingContext(context.Background())
+	}); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 
@@ -54,12 +59,20 @@ func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
 		return nil, fmt.Errorf("minio client: %w", err)
 	}
 
-	if err := pkgMinio.EnsureBucket(context.Background(), minioClient, cfg.MinIO.Bucket); err != nil {
+	if err := retryDependency(logger, "minio bucket", func() error {
+		return pkgMinio.EnsureBucket(context.Background(), minioClient, cfg.MinIO.Bucket)
+	}); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("ensure bucket: %w", err)
 	}
 
-	rabbitPublisher, err := rabbitmq.NewPublisher(cfg.Rabbit.URL, cfg.Rabbit.Exchange)
-	if err != nil {
+	var rabbitPublisher *rabbitmq.Publisher
+	if err := retryDependency(logger, "rabbitmq publisher", func() error {
+		var err error
+		rabbitPublisher, err = rabbitmq.NewPublisher(cfg.Rabbit.URL, cfg.Rabbit.Exchange)
+		return err
+	}); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("rabbitmq publisher: %w", err)
 	}
 
@@ -79,6 +92,36 @@ func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
 	}, nil
 }
 
+func retryDependency(logger *slog.Logger, name string, operation func() error) error {
+	const attempts = 30
+	const delay = 2 * time.Second
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := operation(); err != nil {
+			lastErr = err
+			if attempt == attempts {
+				break
+			}
+			logger.Warn("dependency not ready",
+				"name", name,
+				"attempt", attempt,
+				"maxAttempts", attempts,
+				"error", err,
+			)
+			time.Sleep(delay)
+			continue
+		}
+
+		if attempt > 1 {
+			logger.Info("dependency ready", "name", name, "attempt", attempt)
+		}
+		return nil
+	}
+
+	return lastErr
+}
+
 func (c *Container) Router() http.Handler {
 	router := mux.NewRouter()
 	router.HandleFunc("/api/datasets/health", c.Handler.HealthHandler).Methods(http.MethodGet)
@@ -86,6 +129,7 @@ func (c *Container) Router() http.Handler {
 	router.HandleFunc("/api/datasets/{datasetId}/preview", c.Handler.PreviewHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/analysis/{datasetId}/start", c.Handler.StartAnalysisHandler).Methods(http.MethodPost)
 	router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.StatusHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.UpdateStatusHandler).Methods(http.MethodPatch)
 
 	// serve OpenAPI spec for Swagger UI
 	router.HandleFunc("/api/docs/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {

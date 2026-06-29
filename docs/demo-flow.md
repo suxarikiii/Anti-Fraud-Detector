@@ -51,6 +51,38 @@ topReason
 
 ---
 
+<h2 align="center">Upload Service Smoke Commands</h2>
+
+Run from the repository root after `docker-compose up --build`:
+
+```bash
+backend/upload-service/scripts/smoke_gateway.sh
+```
+
+Equivalent manual commands:
+
+```bash
+curl -s http://localhost:8080/api/datasets/health
+
+curl -s -F "file=@data/clean_refund_dataset.csv" \
+  http://localhost:8080/api/datasets/upload
+
+curl -s -F "file=@data/dirty_business_refund_dataset.csv" \
+  http://localhost:8080/api/datasets/upload
+
+curl -s http://localhost:8080/api/datasets/<datasetId>/preview
+
+curl -s -X POST http://localhost:8080/api/analysis/<datasetId>/start
+
+curl -s http://localhost:8080/api/analysis/<jobId>/status
+
+curl -s -X PATCH http://localhost:8080/api/analysis/<jobId>/status \
+  -H "Content-Type: application/json" \
+  -d '{"status":"COMPLETED"}'
+```
+
+---
+
 <h2 align="center">User Flow Diagram</h2>
 
 ```mermaid

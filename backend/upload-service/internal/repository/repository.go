@@ -115,10 +115,15 @@ func (r *Repository) GetLatestAnalysisJobByDatasetID(ctx context.Context, datase
 }
 
 func (r *Repository) UpdateAnalysisStatus(ctx context.Context, jobID uuid.UUID, status, currentStep string, updatedAt time.Time) error {
+	return r.UpdateAnalysisStatusWithError(ctx, jobID, status, currentStep, "", updatedAt)
+}
+
+func (r *Repository) UpdateAnalysisStatusWithError(ctx context.Context, jobID uuid.UUID, status, currentStep, errorMessage string, updatedAt time.Time) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE analysis_jobs SET status = $1, current_step = $2, updated_at = $3 WHERE id = $4`,
+		`UPDATE analysis_jobs SET status = $1, current_step = $2, error_message = $3, updated_at = $4 WHERE id = $5`,
 		status,
 		currentStep,
+		errorMessage,
 		updatedAt,
 		jobID,
 	)

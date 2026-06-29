@@ -40,6 +40,13 @@ paths:
           description: upload accepted
           content:
             application/json:
+              examples:
+                cleanUpload:
+                  value:
+                    datasetId: 8f79f612-770b-48fd-9d25-79d88d1e4211
+                    jobId: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
+                    filename: clean_refund_dataset.csv
+                    status: UPLOADED
               schema:
                 type: object
                 properties:
@@ -66,6 +73,23 @@ paths:
           description: preview
           content:
             application/json:
+              examples:
+                cleanPreview:
+                  value:
+                    headers:
+                      - order_id
+                      - customer_id
+                      - return_id
+                    rows:
+                      - ["order_1001", "customer_200", "return_3001"]
+                dirtyBusinessPreview:
+                  value:
+                    headers:
+                      - purchase_id
+                      - buyer_id
+                      - refund_request_id
+                    rows:
+                      - ["purchase_1001", "buyer_200", "refund_req_3001"]
               schema:
                 $ref: '#/components/schemas/PreviewResponse'
 
@@ -83,6 +107,10 @@ paths:
           description: job created
           content:
             application/json:
+              examples:
+                startAnalysis:
+                  value:
+                    jobId: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
               schema:
                 type: object
                 properties:
@@ -103,8 +131,65 @@ paths:
           description: job status
           content:
             application/json:
+              examples:
+                normalizing:
+                  value:
+                    id: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
+                    jobId: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
+                    datasetId: 8f79f612-770b-48fd-9d25-79d88d1e4211
+                    status: NORMALIZING
+                    currentStep: NORMALIZING
+                    message: Normalizing CSV columns and refund records.
+                    progressPercent: 20
+                    stages:
+                      - status: UPLOADED
+                        message: Dataset uploaded and ready to start analysis.
+                        state: completed
+                      - status: NORMALIZING
+                        message: Normalizing CSV columns and refund records.
+                        state: current
+                    createdAt: "2026-06-01T10:00:00Z"
+                    updatedAt: "2026-06-01T10:01:00Z"
               schema:
-                $ref: '#/components/schemas/AnalysisJob'
+                $ref: '#/components/schemas/AnalysisStatus'
+
+    patch:
+      summary: Update analysis job status for local demo/admin use
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              scoring:
+                value:
+                  status: SCORING
+              failed:
+                value:
+                  status: FAILED
+                  errorMessage: Failed to calculate refund risk scores
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [UPLOADED, NORMALIZING, NORMALIZED, BUILDING_RELATIONS, SCORING, COMPLETED, FAILED]
+                errorMessage:
+                  type: string
+      responses:
+        '200':
+          description: updated job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisStatus'
 
 components:
   schemas:
@@ -121,10 +206,13 @@ components:
             type: array
             items:
               type: string
-    AnalysisJob:
+    AnalysisStatus:
       type: object
       properties:
         id:
+          type: string
+          format: uuid
+        jobId:
           type: string
           format: uuid
         datasetId:
@@ -132,8 +220,17 @@ components:
           format: uuid
         status:
           type: string
+          enum: [UPLOADED, NORMALIZING, NORMALIZED, BUILDING_RELATIONS, SCORING, COMPLETED, FAILED]
         currentStep:
           type: string
+        message:
+          type: string
+        progressPercent:
+          type: integer
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusStage'
         errorMessage:
           type: string
         createdAt:
@@ -142,3 +239,13 @@ components:
         updatedAt:
           type: string
           format: date-time
+    StatusStage:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        state:
+          type: string
+          enum: [pending, current, completed, failed]
