@@ -1,4 +1,4 @@
-FROM gradle:8.10-jdk17-alpine AS builder
+FROM gradle:8.10-jdk17 AS builder
 
 WORKDIR /src
 
@@ -9,9 +9,11 @@ RUN gradle dependencies --no-daemon || true
 COPY src/ ./src/
 RUN gradle bootJar --no-daemon
 
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre
 
-RUN apk add --no-cache tzdata
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /src/build/libs/*.jar app.jar

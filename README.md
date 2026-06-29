@@ -1,4 +1,4 @@
-<p align="center"> <img src="/home/ernest/Anti-Frod-Detector/frontend/src/assets/brand/anti-fraud-logo-full.png" alt="Fraud & Abuse Detection System Logo" width="200"/> </p>
+<p align="center"> <img src="./frontend/src/assets/brand/anti-fraud-logo-full.png" alt="Fraud & Abuse Detection System Logo" width="400"/> </p>
 
 <p align="center">
   A B2B platform for e-commerce companies that detects suspicious refund approvals by analyzing order history, return requests, and customer support decisions.
@@ -492,17 +492,35 @@ Optional bonus functionality may include:
 
 <h2 align="center">Project Status</h2>
 
-The project is currently in progress.
+The project is currently in Week 2 implementation.
 
-The current focus is Week 1 implementation:
+The current working version includes:
 
-* service skeletons;
-* dataset upload flow;
-* synthetic refund dataset;
-* RabbitMQ pipeline setup;
-* graph relations model;
-* refund approval scoring model;
-* frontend dashboard mock flow;
-* Docker-based local infrastructure.
+* React / TypeScript frontend dashboard with dataset upload, preview, analysis progress, suspicious approvals table, and refund approval details view;
+* Go upload service with CSV upload, dataset records, analysis job creation, preview API, MinIO file storage, PostgreSQL persistence, and RabbitMQ event publishing;
+* Go relations service with REST endpoints for refund relations, customer history, support agent summary, relation features, and RabbitMQ consumption for normalized dataset events;
+* Kotlin / Spring Boot scoring service with suspicious refund approval detection, dataset-aware scoring endpoints, risk levels, explainable risk reasons, support agent risk summary, and RabbitMQ integration;
+* Nginx gateway routing backend API requests to upload, relations, and scoring services;
+* frontend production proxy support for `/api` requests;
+* RabbitMQ pipeline events for `dataset.uploaded`, `dataset.normalized`, `refund.relations.built`, `refund.scoring.completed`, and `pipeline.failed`;
+* demo refund datasets under `data/` for scoring, dashboard, and investigation flows.
 
-As the system evolves, we will add more details about architecture, API endpoints, data models, deployment, demo flow, validation, and weekly progress.
+Known limitations for the current Week 2 version:
+
+* the full ML / normalization service is still planned as a separate pipeline component;
+* some dashboard flows can still use demo scoring data when uploaded datasets are not yet processed through every backend stage;
+* graph storage is represented by the relations service model and API contracts, while dedicated Graph DB integration remains part of the broader MVP plan;
+* end-to-end analysis status depends on all RabbitMQ pipeline consumers being available in the deployed environment.
+
+---
+
+<h2 align="center">Instructions for Running the Project</h2>
+
+Detailed service-specific run instructions are maintained in each component README:
+
+* [Frontend Dashboard](./frontend/README.md#running-the-frontend);
+* [Upload Service](./backend/upload-service/README.md#running-the-upload-service);
+* [Relations Service](./backend/relations-service/README.md#running-the-relations-service);
+* [Scoring Service](./backend/scoring-service/README.md#running-the-scoring-service).
+
+For the full Docker Compose environment, use the deployment configuration provided for the current branch or environment and then follow the service health checks listed in the component README files.

@@ -69,6 +69,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: datasets
       MINIO_SECURE: "false"
+      RABBITMQ_EXCHANGE: "pipeline.exchange"
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,8 +83,12 @@ services:
     image: ${IMAGE_PREFIX:-ammmiii/anti-fraud}-relations-service:${IMAGE_TAG:-latest}
     build:
       context: ./backend/relations-service
+    ports:
+      - "8082:8082"
     environment:
       SERVER_PORT: ":8082"
+      RELATIONS_DATASET_ID: demo
+      RELATIONS_DATASET_PATH: /data/clean_refund_dataset.csv
       RABBITMQ_ENABLED: "true"
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-pipeline.exchange}
@@ -102,6 +107,10 @@ services:
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-guest}
       SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-guest}
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./data:/data:ro
     depends_on:
       rabbitmq:
         condition: service_healthy

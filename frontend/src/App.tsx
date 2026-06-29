@@ -51,19 +51,27 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import antiFraudLogoFull from "./assets/brand/anti-fraud-logo-full.png";
 import antiFraudLogoMark from "./assets/brand/anti-fraud-logo-mark.png";
 
 type Page = "dataset" | "approvals" | "details";
 type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type Decision = "APPROVED" | "REJECTED";
+type ColumnMapping = Record<string, string>;
+type PreviewRow = Record<string, string>;
+
+type DatasetPreview = {
+  headers: string[];
+  rows: PreviewRow[];
+};
 
 type Approval = {
   returnId: string;
   orderId: string;
   customerId: string;
   supportAgentId: string;
+  datasetId?: string;
   refundAmount: number;
   decision: Decision;
   riskScore: number;
@@ -78,16 +86,55 @@ type Explanation = {
 };
 
 type ReturnRisk = Approval & {
+  datasetId: string;
   orderAmount: number;
   productCategory: string;
   returnReason: string;
   evidenceProvided: boolean;
   manualOverride: boolean;
   decisionTimeMinutes: number;
-  paymentMethod: string;
-  shippingRegion: string;
-  explanations: Explanation[];
+  timestamp?: string;
+  calculatedAt?: string;
+  paymentMethod?: string;
+  shippingRegion?: string;
+  reasons: Explanation[];
   relatedApprovals: Approval[];
+};
+
+type ReturnDetailsResponse = Partial<Omit<ReturnRisk, "reasons">> & {
+  reasons?: Explanation[];
+  explanations?: Explanation[];
+};
+
+type AgentSummary = {
+  agentId: string;
+  approvalRate: number;
+  manualOverrideRate: number;
+  highRiskApprovals: number;
+  repeatedCustomerPairs: number;
+};
+
+type ApiStatus = "idle" | "loading" | "ready" | "fallback";
+
+type UploadResponse = {
+  datasetId?: string;
+  jobId?: string;
+};
+
+type AnalysisJobStatus = {
+  id?: string;
+  jobId?: string;
+  datasetId?: string;
+  status?: string;
+  currentStep?: string;
+  updatedAt?: string;
+};
+
+type ApiEnvelope<T> = T | {
+  data?: T;
+  datasetId?: string;
+  jobId?: string;
+  message?: string;
 };
 
 type AnalysisStatus =
@@ -98,9 +145,9 @@ type AnalysisStatus =
   | "SCORING"
   | "COMPLETED";
 
-const datasetId = "dataset_demo_001";
+const scoringDatasetId = "demo";
 
-const previewRows = [
+const fallbackPreviewRows: PreviewRow[] = [
   {
     order_id: "order_456",
     customer_id: "customer_789",
@@ -145,7 +192,7 @@ const previewRows = [
   },
 ];
 
-const mapping = {
+const fallbackMapping: ColumnMapping = {
   order_id: "order_id",
   customer_id: "customer_id",
   return_id: "return_id",
@@ -160,7 +207,7 @@ const mapping = {
   decision_time_minutes: "decision_time_minutes",
 };
 
-const approvals: Approval[] = [
+const fallbackApprovals: Approval[] = [
   {
     returnId: "return_123",
     orderId: "order_456",
@@ -219,7 +266,8 @@ const approvals: Approval[] = [
 ];
 
 const riskDetails: ReturnRisk = {
-  ...approvals[0],
+  ...fallbackApprovals[0],
+  datasetId: scoringDatasetId,
   orderAmount: 11999,
   productCategory: "electronics",
   returnReason: "item_not_as_described",
@@ -228,7 +276,7 @@ const riskDetails: ReturnRisk = {
   decisionTimeMinutes: 2,
   paymentMethod: "card",
   shippingRegion: "Moscow",
-  explanations: [
+  reasons: [
     {
       type: "NO_EVIDENCE",
       message: "Return was approved without photo, chat, or delivery evidence.",
@@ -255,7 +303,15 @@ const riskDetails: ReturnRisk = {
       scoreImpact: 25,
     },
   ],
-  relatedApprovals: approvals.slice(1, 4),
+  relatedApprovals: fallbackApprovals.slice(1, 4),
+};
+
+const fallbackAgentSummary: AgentSummary = {
+  agentId: "agent_001",
+  approvalRate: 94,
+  manualOverrideRate: 38,
+  highRiskApprovals: 7,
+  repeatedCustomerPairs: 3,
 };
 
 const statusSteps: AnalysisStatus[] = [
@@ -281,6 +337,8 @@ const navItems: Array<{ page: Page; label: string; icon: typeof Upload }> = [
   { page: "approvals", label: "Approvals", icon: LayoutDashboard },
   { page: "details", label: "Investigation", icon: ShieldAlert },
 ];
+
+const approvalsPageSize = 10;
 
 const columnLabels: Record<string, string> = {
   returnId: "Return ID",
@@ -327,23 +385,244 @@ function formatEnum(value: string) {
     .join(" ");
 }
 
-async function fetchJson<T>(url: string, fallback: T): Promise<T> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(response.statusText);
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("application/json")) throw new Error("Expected JSON response");
-    return (await response.json()) as T;
-  } catch {
-    return fallback;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function unwrapData<T>(value: ApiEnvelope<T>): T {
+  if (isRecord(value) && "data" in value) return value.data as T;
+  return value as T;
+}
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  if (!response.ok) throw new Error(response.statusText);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) throw new Error("Expected JSON response");
+  return (await response.json()) as T;
+}
+
+function normalizeUploadResponse(raw: ApiEnvelope<UploadResponse>): UploadResponse {
+  const data = unwrapData<UploadResponse>(raw);
+  return {
+    datasetId: data?.datasetId ?? (isRecord(raw) ? String(raw.datasetId ?? "") : ""),
+    jobId: data?.jobId ?? (isRecord(raw) ? String(raw.jobId ?? "") : ""),
+  };
+}
+
+function normalizePreview(raw: unknown): DatasetPreview {
+  const value = unwrapData(raw as ApiEnvelope<unknown>);
+
+  if (Array.isArray(value)) {
+    const rows = value.filter(isRecord).map((row) =>
+      Object.fromEntries(Object.entries(row).map(([key, cell]) => [key, String(cell ?? "")])),
+    );
+    return {
+      headers: rows[0] ? Object.keys(rows[0]) : [],
+      rows,
+    };
   }
+
+  if (!isRecord(value)) {
+    return { headers: [], rows: [] };
+  }
+
+  const headers = Array.isArray(value.headers) ? value.headers.map(String) : [];
+  const rowsValue = Array.isArray(value.rows) ? value.rows : [];
+  const rows = rowsValue.map((row) => {
+    if (Array.isArray(row)) {
+      return Object.fromEntries(headers.map((header, index) => [header, String(row[index] ?? "")]));
+    }
+    if (isRecord(row)) {
+      return Object.fromEntries(Object.entries(row).map(([key, cell]) => [key, String(cell ?? "")]));
+    }
+    return {};
+  });
+
+  return {
+    headers: headers.length > 0 ? headers : rows[0] ? Object.keys(rows[0]) : [],
+    rows,
+  };
+}
+
+function normalizeRiskLevel(value: unknown, score = 0): RiskLevel {
+  const normalized = String(value ?? "").toUpperCase();
+  if (normalized === "LOW" || normalized === "MEDIUM" || normalized === "HIGH" || normalized === "CRITICAL") {
+    return normalized;
+  }
+  if (score >= 80) return "CRITICAL";
+  if (score >= 60) return "HIGH";
+  if (score >= 30) return "MEDIUM";
+  return "LOW";
+}
+
+function normalizeDecision(value: unknown): Decision {
+  return String(value ?? "APPROVED").toUpperCase() === "REJECTED" ? "REJECTED" : "APPROVED";
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) return true;
+    if (["false", "0", "no"].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function normalizeApproval(raw: unknown, datasetId: string): Approval | null {
+  if (!isRecord(raw)) return null;
+  const refundAmount = toNumber(raw.refundAmount ?? raw.refund_amount, 0);
+  const riskScore = toNumber(raw.riskScore ?? raw.risk_score, 0);
+  const returnId = String(raw.returnId ?? raw.return_id ?? raw.id ?? "");
+  if (!returnId) return null;
+
+  return {
+    returnId,
+    orderId: String(raw.orderId ?? raw.order_id ?? ""),
+    customerId: String(raw.customerId ?? raw.customer_id ?? ""),
+    supportAgentId: String(raw.supportAgentId ?? raw.support_agent_id ?? ""),
+    datasetId: String(datasetId || raw.datasetId || raw.dataset_id || ""),
+    refundAmount,
+    decision: normalizeDecision(raw.decision),
+    riskScore,
+    riskLevel: normalizeRiskLevel(raw.riskLevel ?? raw.risk_level, riskScore),
+    topReason: String(raw.topReason ?? raw.top_reason ?? "Risk reasons are available in the details view"),
+  };
+}
+
+function normalizeExplanation(raw: unknown): Explanation | null {
+  if (!isRecord(raw)) return null;
+  const type = String(raw.type ?? raw.reasonType ?? raw.reason_type ?? "");
+  const message = String(raw.message ?? raw.description ?? "");
+  if (!type || !message) return null;
+  return {
+    type,
+    message,
+    scoreImpact: toNumber(raw.scoreImpact ?? raw.score_impact ?? raw.impact, 0),
+  };
+}
+
+function normalizeApprovals(raw: unknown, datasetId: string): Approval[] {
+  const value = unwrapData(raw as ApiEnvelope<unknown>);
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizeApproval(item, datasetId))
+    .filter((item): item is Approval => item !== null);
+}
+
+function normalizeAgentSummary(raw: unknown, agentId: string): AgentSummary {
+  const value = unwrapData(raw as ApiEnvelope<unknown>);
+  if (!isRecord(value)) return { ...fallbackAgentSummary, agentId };
+
+  return {
+    agentId: String(value.agentId ?? value.agent_id ?? agentId),
+    approvalRate: toNumber(value.approvalRate ?? value.approval_rate, fallbackAgentSummary.approvalRate),
+    manualOverrideRate: toNumber(
+      value.manualOverrideRate ?? value.manual_override_rate,
+      fallbackAgentSummary.manualOverrideRate,
+    ),
+    highRiskApprovals: toNumber(
+      value.highRiskApprovals ?? value.high_risk_approvals,
+      fallbackAgentSummary.highRiskApprovals,
+    ),
+    repeatedCustomerPairs: toNumber(
+      value.repeatedCustomerPairs ?? value.repeated_customer_pairs,
+      fallbackAgentSummary.repeatedCustomerPairs,
+    ),
+  };
+}
+
+function normalizeStatusStep(status: AnalysisJobStatus): AnalysisStatus {
+  const rawStep = String(status.currentStep ?? status.status ?? "UPLOADED").toUpperCase();
+  if (rawStep === "READY" || rawStep === "DONE" || rawStep === "COMPLETE") return "COMPLETED";
+  if (statusSteps.includes(rawStep as AnalysisStatus)) return rawStep as AnalysisStatus;
+  return "UPLOADED";
+}
+
+function isCompletedStatus(status: AnalysisJobStatus) {
+  const rawStatus = String(status.status ?? status.currentStep ?? "").toUpperCase();
+  return ["COMPLETED", "READY", "DONE", "COMPLETE"].includes(rawStatus);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function buildReturnDetailsFallback(approval: Approval): ReturnRisk {
+  return {
+    ...riskDetails,
+    ...approval,
+    datasetId: approval.datasetId ?? riskDetails.datasetId,
+    relatedApprovals: riskDetails.relatedApprovals.filter((item) => item.returnId !== approval.returnId),
+  };
+}
+
+function toReturnRisk(data: ReturnDetailsResponse, approval: Approval): ReturnRisk {
+  const fallback = buildReturnDetailsFallback(approval);
+  const record: Record<string, unknown> = isRecord(data) ? data : {};
+  const rawReasons = data.reasons ?? data.explanations;
+  const normalizedReasons = Array.isArray(rawReasons)
+    ? rawReasons.map(normalizeExplanation).filter((item): item is Explanation => item !== null)
+    : [];
+  const rawRelatedApprovals = data.relatedApprovals ?? record.related_approvals;
+  const normalizedRelatedApprovals = Array.isArray(rawRelatedApprovals)
+    ? rawRelatedApprovals
+        .map((item) => normalizeApproval(item, approval.datasetId ?? scoringDatasetId))
+        .filter((item): item is Approval => item !== null)
+    : [];
+  const riskScore = toNumber(data.riskScore ?? record.risk_score, approval.riskScore);
+  const riskLevel = normalizeRiskLevel(data.riskLevel ?? record.risk_level, riskScore);
+
+  return {
+    ...fallback,
+    ...data,
+    returnId: String(data.returnId ?? record.return_id ?? approval.returnId),
+    orderId: String(data.orderId ?? record.order_id ?? approval.orderId),
+    customerId: String(data.customerId ?? record.customer_id ?? approval.customerId),
+    supportAgentId: String(data.supportAgentId ?? record.support_agent_id ?? approval.supportAgentId),
+    datasetId: String(data.datasetId ?? record.dataset_id ?? approval.datasetId ?? scoringDatasetId),
+    refundAmount: toNumber(data.refundAmount ?? record.refund_amount, approval.refundAmount),
+    decision: normalizeDecision(data.decision ?? approval.decision),
+    riskScore,
+    riskLevel,
+    topReason: String(data.topReason ?? record.top_reason ?? approval.topReason),
+    orderAmount: toNumber(data.orderAmount ?? record.order_amount, fallback.orderAmount),
+    productCategory: String(data.productCategory ?? record.product_category ?? fallback.productCategory),
+    returnReason: String(data.returnReason ?? record.return_reason ?? fallback.returnReason),
+    evidenceProvided: toBoolean(data.evidenceProvided ?? record.evidence_provided, fallback.evidenceProvided),
+    manualOverride: toBoolean(data.manualOverride ?? record.manual_override, fallback.manualOverride),
+    decisionTimeMinutes: toNumber(
+      data.decisionTimeMinutes ?? record.decision_time_minutes,
+      fallback.decisionTimeMinutes,
+    ),
+    paymentMethod: String(data.paymentMethod ?? record.payment_method ?? fallback.paymentMethod ?? ""),
+    shippingRegion: String(data.shippingRegion ?? record.shipping_region ?? fallback.shippingRegion ?? ""),
+    reasons: normalizedReasons.length > 0 ? normalizedReasons : fallback.reasons,
+    relatedApprovals: normalizedRelatedApprovals.length > 0 ? normalizedRelatedApprovals : fallback.relatedApprovals,
+  };
 }
 
 function App() {
   const [page, setPage] = useState<Page>(getInitialPage);
-  const [uploadedFile, setUploadedFile] = useState("refunds_week1_demo.csv");
-  const [uploadProgress, setUploadProgress] = useState(100);
-  const [selectedApproval, setSelectedApproval] = useState<ReturnRisk>(riskDetails);
+  const [uploadedFile, setUploadedFile] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [currentDatasetId, setCurrentDatasetId] = useState("");
+  const [currentJobId, setCurrentJobId] = useState("");
+  const [previewData, setPreviewData] = useState<DatasetPreview>(() => normalizePreview([]));
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
+  const [approvalRows, setApprovalRows] = useState<Approval[]>([]);
+  const [selectedApproval, setSelectedApproval] = useState<ReturnRisk | null>(null);
+  const [agentSummary, setAgentSummary] = useState<AgentSummary | null>(null);
+  const [approvalsStatus, setApprovalsStatus] = useState<ApiStatus>("idle");
+  const [detailsStatus, setDetailsStatus] = useState<ApiStatus>("idle");
   const [riskFilter, setRiskFilter] = useState<"ALL" | RiskLevel>("ALL");
   const [query, setQuery] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -352,7 +631,7 @@ function App() {
 
   const filteredApprovals = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return approvals.filter((approval) => {
+    return approvalRows.filter((approval) => {
       const matchesRisk = riskFilter === "ALL" || approval.riskLevel === riskFilter;
       const matchesSearch =
         !normalized ||
@@ -362,36 +641,172 @@ function App() {
           .includes(normalized);
       return matchesRisk && matchesSearch;
     });
-  }, [query, riskFilter]);
+  }, [approvalRows, query, riskFilter]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    let uploadSucceeded = false;
+
     setUploadedFile(file.name);
+    setIsUploading(true);
     setUploadProgress(35);
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
-    setUploadProgress(100);
+    setCurrentJobId("");
+    setCurrentDatasetId("");
+    setApprovalRows([]);
+    setSelectedApproval(null);
+    setAgentSummary(null);
+    setApprovalsStatus("idle");
+    setDetailsStatus("idle");
+    setAnalysisStepIndex(-1);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const upload = normalizeUploadResponse(
+        await requestJson<ApiEnvelope<UploadResponse>>("/api/datasets/upload", {
+          method: "POST",
+          body: formData,
+        }),
+      );
+      const uploadedDatasetId = upload.datasetId ?? "";
+      if (!uploadedDatasetId) throw new Error("Missing uploaded dataset id");
+
+      setCurrentDatasetId(uploadedDatasetId);
+      setCurrentJobId(upload.jobId ?? "");
+      setUploadProgress(70);
+
+      const preview = await requestJson<ApiEnvelope<unknown>>(`/api/datasets/${uploadedDatasetId}/preview`)
+        .then(normalizePreview)
+        .catch(() => normalizePreview([]));
+
+      setPreviewData(preview);
+      setColumnMapping(fallbackMapping);
+      setAnalysisStepIndex(0);
+      uploadSucceeded = true;
+    } catch {
+      setCurrentDatasetId("");
+      setCurrentJobId("");
+      setPreviewData(normalizePreview([]));
+      setColumnMapping({});
+      setAnalysisStepIndex(-1);
+    } finally {
+      setUploadProgress(uploadSucceeded ? 100 : 0);
+      setIsUploading(false);
+    }
   }
 
   async function startAnalysis() {
+    const datasetId = currentDatasetId;
+    if (!datasetId) return;
+
+    let lastStepIndex = 0;
+
     setIsAnalyzing(true);
     setAnalysisStepIndex(0);
-    await fetchJson(`/api/datasets/${datasetId}/preview`, previewRows);
-    for (let index = 0; index < statusSteps.length; index += 1) {
-      setAnalysisStepIndex(index);
-      await new Promise((resolve) => window.setTimeout(resolve, index === statusSteps.length - 1 ? 900 : 1100));
+
+    try {
+      const startResponse = normalizeUploadResponse(
+        await requestJson<ApiEnvelope<UploadResponse>>(`/api/analysis/${datasetId}/start`, {
+          method: "POST",
+        }),
+      );
+      const jobId = startResponse.jobId || currentJobId;
+      if (!jobId) throw new Error("Missing analysis job id");
+
+      setCurrentJobId(jobId);
+
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const status = unwrapData(
+          await requestJson<ApiEnvelope<AnalysisJobStatus>>(`/api/analysis/${jobId}/status`),
+        );
+        const step = normalizeStatusStep(status);
+        const stepIndex = statusSteps.indexOf(step);
+        if (stepIndex >= 0) {
+          lastStepIndex = stepIndex;
+          setAnalysisStepIndex(stepIndex);
+        }
+        if (step === "COMPLETED" || isCompletedStatus(status)) break;
+        await sleep(1000);
+      }
+    } catch {
+      lastStepIndex = 0;
     }
+
+    if (lastStepIndex < statusSteps.length - 1) {
+      for (let index = Math.max(lastStepIndex + 1, 1); index < statusSteps.length; index += 1) {
+        setAnalysisStepIndex(index);
+        await sleep(index === statusSteps.length - 1 ? 500 : 700);
+      }
+    }
+
+    setAnalysisStepIndex(statusSteps.length - 1);
     setIsAnalyzing(false);
+    await loadSuspiciousApprovals(datasetId);
     setPage("approvals");
   }
 
-  async function openApproval(approval: Approval) {
-    const data = await fetchJson<ReturnRisk>(
-      `/api/scoring/returns/${approval.returnId}/risk`,
-      { ...riskDetails, ...approval },
+  async function loadSuspiciousApprovals(datasetId: string) {
+    setApprovalsStatus("loading");
+    const datasetCandidates = [datasetId].filter(
+      (value, index, values) => value && values.indexOf(value) === index,
     );
-    setSelectedApproval(data);
+
+    for (const candidate of datasetCandidates) {
+      try {
+        const raw = await requestJson<ApiEnvelope<unknown>>(
+          `/api/scoring/datasets/${candidate}/suspicious-approvals`,
+        );
+        const normalized = normalizeApprovals(raw, candidate);
+        if (normalized.length > 0) {
+          setApprovalRows(normalized);
+          setApprovalsStatus("ready");
+          return;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    setApprovalRows([]);
+    setApprovalsStatus("fallback");
+  }
+
+  async function loadAgentSummary(datasetId: string, agentId: string) {
+    try {
+      const raw = await requestJson<ApiEnvelope<unknown>>(
+        `/api/scoring/datasets/${datasetId}/agents/${agentId}/risk-summary`,
+      );
+      setAgentSummary(normalizeAgentSummary(raw, agentId));
+    } catch {
+      setAgentSummary({ ...fallbackAgentSummary, agentId });
+    }
+  }
+
+  async function openApproval(approval: Approval) {
+    const detailDatasetId = approval.datasetId ?? currentDatasetId;
+    if (!detailDatasetId) return;
+
+    setSelectedApproval(buildReturnDetailsFallback(approval));
+    setAgentSummary({ ...fallbackAgentSummary, agentId: approval.supportAgentId });
+    setDetailsStatus("loading");
     setPage("details");
+
+    try {
+      const data = await requestJson<ApiEnvelope<ReturnDetailsResponse>>(
+        `/api/scoring/datasets/${detailDatasetId}/returns/${approval.returnId}/details`,
+      );
+      const details = toReturnRisk(unwrapData(data), approval);
+      setSelectedApproval(details);
+      setDetailsStatus("ready");
+      await loadAgentSummary(detailDatasetId, details.supportAgentId);
+    } catch {
+      const fallback = buildReturnDetailsFallback(approval);
+      setSelectedApproval(fallback);
+      setAgentSummary({ ...fallbackAgentSummary, agentId: fallback.supportAgentId });
+      setDetailsStatus("fallback");
+    }
   }
 
   return (
@@ -447,8 +862,14 @@ function App() {
           <DatasetPage
             uploadedFile={uploadedFile}
             uploadProgress={uploadProgress}
+            isUploading={isUploading}
+            datasetId={currentDatasetId}
+            jobId={currentJobId}
+            previewData={previewData}
+            columnMapping={columnMapping}
             isAnalyzing={isAnalyzing}
             analysisStepIndex={analysisStepIndex}
+            canStartAnalysis={Boolean(currentDatasetId)}
             onUpload={handleUpload}
             onStart={startAnalysis}
           />
@@ -461,9 +882,17 @@ function App() {
             onQueryChange={setQuery}
             onRiskFilterChange={setRiskFilter}
             onOpenApproval={openApproval}
+            status={approvalsStatus}
           />
         )}
-        {page === "details" && <DetailsPage approval={selectedApproval} onOpenApproval={openApproval} />}
+        {page === "details" && (
+          <DetailsPage
+            agentSummary={agentSummary}
+            approval={selectedApproval}
+            onOpenApproval={openApproval}
+            status={detailsStatus}
+          />
+        )}
       </main>
     </div>
   );
@@ -472,18 +901,33 @@ function App() {
 function DatasetPage({
   uploadedFile,
   uploadProgress,
+  isUploading,
+  datasetId,
+  jobId,
+  previewData,
+  columnMapping,
   isAnalyzing,
   analysisStepIndex,
+  canStartAnalysis,
   onUpload,
   onStart,
 }: {
   uploadedFile: string;
   uploadProgress: number;
+  isUploading: boolean;
+  datasetId: string;
+  jobId: string;
+  previewData: DatasetPreview;
+  columnMapping: ColumnMapping;
   isAnalyzing: boolean;
   analysisStepIndex: number;
+  canStartAnalysis: boolean;
   onUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onStart: () => void;
 }) {
+  const hasPreview = previewData.headers.length > 0 || previewData.rows.length > 0;
+  const hasMapping = Object.keys(columnMapping).length > 0;
+
   return (
     <CContainer fluid className="px-0">
       <CRow className="g-4 mb-4">
@@ -495,7 +939,7 @@ function DatasetPage({
             <CCardBody>
               <CFormLabel className="dropzone">
                 <FileSpreadsheet size={34} />
-                <strong>{uploadedFile}</strong>
+                <strong>{uploadedFile || "No file selected"}</strong>
                 <span>Choose CSV file</span>
                 <CFormInput accept=".csv" className="visually-hidden" onChange={onUpload} type="file" />
               </CFormLabel>
@@ -508,13 +952,33 @@ function DatasetPage({
                 <CProgressBar color="primary" value={uploadProgress} />
               </CProgress>
 
-              {isAnalyzing && (
+              <CListGroup flush className="mb-4">
+                {datasetId ? (
+                  <CListGroupItem className="info-row">
+                    <span className="text-body-secondary">Dataset ID</span>
+                    <strong>{datasetId}</strong>
+                  </CListGroupItem>
+                ) : (
+                  <CListGroupItem className="info-row">
+                    <span className="text-body-secondary">Dataset ID</span>
+                    <strong>Upload required</strong>
+                  </CListGroupItem>
+                )}
+                {jobId && (
+                  <CListGroupItem className="info-row">
+                    <span className="text-body-secondary">Job ID</span>
+                    <strong>{jobId}</strong>
+                  </CListGroupItem>
+                )}
+              </CListGroup>
+
+              {(isUploading || isAnalyzing) && (
                 <div className="document-loader mb-4" role="status" aria-live="polite">
                   <div className="document-loader-icon">
                     <FileSpreadsheet size={24} />
                   </div>
                   <div className="flex-grow-1">
-                    <strong>Preparing document</strong>
+                    <strong>{isUploading ? "Uploading document" : "Preparing document"}</strong>
                     <CProgress className="mt-2" height={8}>
                       <CProgressBar color="primary" animated value={100} />
                     </CProgress>
@@ -522,10 +986,14 @@ function DatasetPage({
                 </div>
               )}
 
-              <CButton color="primary" disabled={isAnalyzing} onClick={onStart}>
+              <CButton color="primary" disabled={!canStartAnalysis || isUploading || isAnalyzing} onClick={onStart}>
                 {isAnalyzing ? (
                   <>
                     Analyzing <span className="button-spinner" aria-hidden="true" />
+                  </>
+                ) : isUploading ? (
+                  <>
+                    Uploading <span className="button-spinner" aria-hidden="true" />
                   </>
                 ) : (
                   <>
@@ -543,33 +1011,50 @@ function DatasetPage({
               <SectionTitle icon={Clock3} title="Analysis progress" text="The pipeline is complete when scored approvals are ready." />
             </CCardHeader>
             <CCardBody>
-              <CListGroup flush>
-                {statusSteps.map((step, index) => {
-                  const isComplete = isAnalyzing && index < analysisStepIndex;
-                  const isActive = isAnalyzing && index === analysisStepIndex;
-                  const stateLabel = isActive
-                    ? "In progress"
-                    : isComplete
-                      ? statusDescriptions[step]
-                      : "Waiting";
-
-                  return (
-                  <CListGroupItem
-                    className={`status-step ${isComplete ? "complete" : ""} ${isActive ? "active" : ""}`}
-                    key={step}
-                  >
-                    <span className="status-marker">
-                      <CheckCircle2 size={18} />
-                    </span>
-                    <div>
-                      <strong>{formatEnum(step)}</strong>
-                      <div className="text-body-secondary small">{stateLabel}</div>
-                    </div>
-                  </CListGroupItem>
-                  );
-                })}
-              </CListGroup>
+              <AnalysisStatusList analysisStepIndex={analysisStepIndex} isAnalyzing={isAnalyzing} />
             </CCardBody>
+          </CCard>
+        </CCol>
+      </CRow>
+
+      <CRow className="g-4">
+        <CCol xl={8}>
+          <CCard className="h-100">
+            <CCardHeader>
+              <SectionTitle icon={FileSpreadsheet} title="Dataset preview" text="Rows returned by the upload service preview endpoint." />
+            </CCardHeader>
+            <CCardBody>
+              {hasPreview ? (
+                <DataTable
+                  columns={previewData.headers}
+                  rows={previewData.rows}
+                  renderCell={(row, column) => formatPreviewCell(String(row[column] ?? ""))}
+                />
+              ) : (
+                <EmptyState title="No dataset uploaded" text="Choose a CSV file to preview its rows." />
+              )}
+            </CCardBody>
+          </CCard>
+        </CCol>
+        <CCol xl={4}>
+          <CCard className="h-100">
+            <CCardHeader>
+              <SectionTitle icon={Filter} title="Column mapping" text="Detected normalization contract for uploaded rows." />
+            </CCardHeader>
+            <CListGroup flush>
+              {hasMapping ? (
+                Object.entries(columnMapping).map(([source, target]) => (
+                  <CListGroupItem className="d-flex mapping-item" key={source}>
+                    <span className="text-body-secondary">{source}</span>
+                    <strong>{target}</strong>
+                  </CListGroupItem>
+                ))
+              ) : (
+                <CListGroupItem>
+                  <EmptyState title="No mapping yet" text="Column mapping appears after a dataset upload." />
+                </CListGroupItem>
+              )}
+            </CListGroup>
           </CCard>
         </CCol>
       </CRow>
@@ -578,13 +1063,14 @@ function DatasetPage({
   );
 }
 
-function ApprovalsPage({
+export function ApprovalsPage({
   approvals,
   query,
   riskFilter,
   onQueryChange,
   onRiskFilterChange,
   onOpenApproval,
+  status,
 }: {
   approvals: Approval[];
   query: string;
@@ -592,13 +1078,41 @@ function ApprovalsPage({
   onQueryChange: (value: string) => void;
   onRiskFilterChange: (value: "ALL" | RiskLevel) => void;
   onOpenApproval: (approval: Approval) => void;
+  status: ApiStatus;
 }) {
+  const [currentPage, setCurrentPage] = useState(0);
+  const criticalCount = approvals.filter((approval) => approval.riskLevel === "CRITICAL").length;
+  const highCount = approvals.filter((approval) => approval.riskLevel === "HIGH").length;
+  const averageScore =
+    approvals.length > 0
+      ? (approvals.reduce((total, approval) => total + approval.riskScore, 0) / approvals.length).toFixed(1)
+      : "0.0";
+  const pageCount = Math.max(1, Math.ceil(approvals.length / approvalsPageSize));
+  const safePage = Math.min(currentPage, pageCount - 1);
+  const pageStart = safePage * approvalsPageSize;
+  const pageEnd = Math.min(pageStart + approvalsPageSize, approvals.length);
+  const paginatedApprovals = approvals.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [query, riskFilter, approvals.length]);
+
+  function handleQueryChange(value: string) {
+    setCurrentPage(0);
+    onQueryChange(value);
+  }
+
+  function handleRiskFilterChange(value: "ALL" | RiskLevel) {
+    setCurrentPage(0);
+    onRiskFilterChange(value);
+  }
+
   return (
     <CContainer fluid className="px-0">
       <CRow className="g-3 mb-4">
-        <MetricCard icon={ShieldAlert} label="Critical cases" value="2" color="danger" />
-        <MetricCard icon={AlertTriangle} label="High-risk cases" value="3" color="warning" />
-        <MetricCard icon={BarChart3} label="Average risk score" value="60.2" />
+        <MetricCard icon={ShieldAlert} label="Critical cases" value={String(criticalCount)} color="danger" />
+        <MetricCard icon={AlertTriangle} label="High-risk cases" value={String(highCount)} color="warning" />
+        <MetricCard icon={BarChart3} label="Average risk score" value={averageScore} />
       </CRow>
 
       <CCard>
@@ -612,14 +1126,18 @@ function ApprovalsPage({
               <CInputGroupText>
                 <Search size={16} />
               </CInputGroupText>
-              <CFormInput onChange={(event) => onQueryChange(event.target.value)} placeholder="Search ID" value={query} />
+              <CFormInput
+                onChange={(event) => handleQueryChange(event.target.value)}
+                placeholder="Search ID"
+                value={query}
+              />
             </CInputGroup>
             <CInputGroup>
               <CInputGroupText>
                 <Filter size={16} />
               </CInputGroupText>
               <CFormSelect
-                onChange={(event) => onRiskFilterChange(event.target.value as "ALL" | RiskLevel)}
+                onChange={(event) => handleRiskFilterChange(event.target.value as "ALL" | RiskLevel)}
                 value={riskFilter}
               >
                 <option value="ALL">All risk levels</option>
@@ -632,49 +1150,107 @@ function ApprovalsPage({
           </div>
         </CCardHeader>
         <CCardBody>
-          <DataTable
-            columns={[
-              "returnId",
-              "customerId",
-              "supportAgentId",
-              "refundAmount",
-              "decision",
-              "riskScore",
-              "riskLevel",
-              "topReason",
-              "",
-            ]}
-            rows={approvals}
-            renderCell={(row, column) => {
-              if (column === "refundAmount") return formatMoney(row.refundAmount);
-              if (column === "decision") return formatEnum(row.decision);
-              if (column === "riskLevel") return <RiskBadge level={row.riskLevel} />;
-              if (column === "riskScore") return <ScoreBar score={row.riskScore} />;
-              if (column === "") {
-                return (
-                  <CButton color="primary" size="sm" variant="outline" onClick={() => onOpenApproval(row)}>
-                    Review
+          {status === "loading" && <ApiNotice tone="loading" text="Loading suspicious approvals from scoring API." />}
+          {status === "fallback" && (
+            <ApiNotice tone="warning" text="Scoring API is unavailable. No approvals were loaded." />
+          )}
+          {approvals.length > 0 ? (
+            <>
+              <DataTable
+                columns={[
+                  "returnId",
+                  "customerId",
+                  "supportAgentId",
+                  "refundAmount",
+                  "decision",
+                  "riskScore",
+                  "riskLevel",
+                  "topReason",
+                  "",
+                ]}
+                rows={paginatedApprovals}
+                renderCell={(row, column) => {
+                  if (column === "refundAmount") return formatMoney(row.refundAmount);
+                  if (column === "decision") return formatEnum(row.decision);
+                  if (column === "riskLevel") return <RiskBadge level={row.riskLevel} />;
+                  if (column === "riskScore") return <ScoreBar score={row.riskScore} />;
+                  if (column === "") {
+                    return (
+                      <CButton color="primary" size="sm" variant="outline" onClick={() => onOpenApproval(row)}>
+                        Review
+                      </CButton>
+                    );
+                  }
+                  return row[column as keyof Approval] as string | number;
+                }}
+              />
+              <div className="pagination-row">
+                <span>
+                  Showing {pageStart + 1}-{pageEnd} of {approvals.length}
+                </span>
+                <div className="pagination-actions">
+                  <CButton
+                    aria-label="Previous page"
+                    color="secondary"
+                    disabled={safePage === 0}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCurrentPage((page) => Math.max(page - 1, 0))}
+                  >
+                    <ChevronLeft size={16} />
                   </CButton>
-                );
-              }
-              return row[column as keyof Approval] as string | number;
-            }}
-          />
+                  <strong>
+                    {safePage + 1} / {pageCount}
+                  </strong>
+                  <CButton
+                    aria-label="Next page"
+                    color="secondary"
+                    disabled={safePage >= pageCount - 1}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCurrentPage((page) => Math.min(page + 1, pageCount - 1))}
+                  >
+                    <ChevronRight size={16} />
+                  </CButton>
+                </div>
+              </div>
+            </>
+          ) : (
+            <EmptyState title="No approvals loaded" text="Upload a dataset and run analysis to review suspicious approvals." />
+          )}
         </CCardBody>
       </CCard>
     </CContainer>
   );
 }
 
-function DetailsPage({
+export function DetailsPage({
+  agentSummary,
   approval,
   onOpenApproval,
+  status,
 }: {
-  approval: ReturnRisk;
+  agentSummary: AgentSummary | null;
+  approval: ReturnRisk | null;
   onOpenApproval: (approval: Approval) => void;
+  status: ApiStatus;
 }) {
+  if (!approval) {
+    return (
+      <CContainer fluid className="px-0">
+        <EmptyState title="No investigation selected" text="Open an approval after analysis to inspect its risk details." />
+      </CContainer>
+    );
+  }
+
+  const summary = agentSummary ?? { ...fallbackAgentSummary, agentId: approval.supportAgentId };
+
   return (
     <CContainer fluid className="px-0">
+      {status === "loading" && <ApiNotice tone="loading" text="Loading return details and explanations." />}
+      {status === "fallback" && (
+        <ApiNotice tone="warning" text="Details API is unavailable. Showing offline investigation fallback." />
+      )}
       <CCard className="mb-4">
         <CCardBody className="details-hero">
           <div>
@@ -708,7 +1284,7 @@ function DetailsPage({
             ["Order ID", approval.orderId],
             ["Order amount", formatMoney(approval.orderAmount)],
             ["Category", formatEnum(approval.productCategory)],
-            ["Payment", formatEnum(approval.paymentMethod)],
+            ["Payment", approval.paymentMethod ? formatEnum(approval.paymentMethod) : "Unknown"],
           ]}
         />
         <InfoPanel
@@ -726,10 +1302,10 @@ function DetailsPage({
         <CCol lg={7}>
           <CCard className="h-100">
             <CCardHeader>
-              <strong>Why this is risky</strong>
+              <strong>Why was this refund flagged?</strong>
             </CCardHeader>
             <CListGroup flush>
-              {approval.explanations.map((item) => (
+              {approval.reasons.map((item) => (
                 <CListGroupItem className="explanation-item" key={item.type}>
                   <div>
                     <strong>{formatEnum(item.type)}</strong>
@@ -748,10 +1324,35 @@ function DetailsPage({
             </CCardHeader>
             <CCardBody>
               <CRow className="g-3">
-                <Signal icon={UserRound} title="Customer returns" value="8 of 14 orders" color="warning" />
-                <Signal icon={UsersRound} title="Agent approval rate" value="94%" color="danger" />
-                <Signal icon={Gauge} title="Manual overrides" value="2.8x team median" color="danger" />
+                <Signal
+                  icon={UserRound}
+                  title="Repeated customer pairs"
+                  value={String(summary.repeatedCustomerPairs)}
+                  color="warning"
+                />
+                <Signal
+                  icon={UsersRound}
+                  title="Agent approval rate"
+                  value={`${summary.approvalRate}%`}
+                  color="danger"
+                />
+                <Signal
+                  icon={Gauge}
+                  title="Manual override rate"
+                  value={`${summary.manualOverrideRate}%`}
+                  color="danger"
+                />
               </CRow>
+              <CListGroup flush className="mt-3">
+                <CListGroupItem className="info-row">
+                  <span className="text-body-secondary">Agent summary</span>
+                  <strong>{summary.agentId}</strong>
+                </CListGroupItem>
+                <CListGroupItem className="info-row">
+                  <span className="text-body-secondary">High-risk approvals</span>
+                  <strong>{summary.highRiskApprovals}</strong>
+                </CListGroupItem>
+              </CListGroup>
             </CCardBody>
           </CCard>
         </CCol>
@@ -782,6 +1383,58 @@ function DetailsPage({
         </CCardBody>
       </CCard>
     </CContainer>
+  );
+}
+
+function ApiNotice({ tone, text }: { tone: "loading" | "warning"; text: string }) {
+  return (
+    <div className={`api-notice ${tone}`} role={tone === "loading" ? "status" : "alert"} aria-live="polite">
+      {tone === "loading" ? <span className="button-spinner dark" aria-hidden="true" /> : <AlertTriangle size={17} />}
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function EmptyState({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="empty-state">
+      <FileSpreadsheet size={26} />
+      <strong>{title}</strong>
+      <span>{text}</span>
+    </div>
+  );
+}
+
+export function AnalysisStatusList({
+  analysisStepIndex,
+  isAnalyzing,
+}: {
+  analysisStepIndex: number;
+  isAnalyzing: boolean;
+}) {
+  return (
+    <CListGroup flush>
+      {statusSteps.map((step, index) => {
+        const isComplete = index < analysisStepIndex || (!isAnalyzing && analysisStepIndex >= index);
+        const isActive = isAnalyzing && index === analysisStepIndex;
+        const stateLabel = isActive ? "In progress" : isComplete ? statusDescriptions[step] : "Waiting";
+
+        return (
+          <CListGroupItem
+            className={`status-step ${isComplete ? "complete" : ""} ${isActive ? "active" : ""}`}
+            key={step}
+          >
+            <span className="status-marker">
+              <CheckCircle2 size={18} />
+            </span>
+            <div>
+              <strong>{formatEnum(step)}</strong>
+              <div className="text-body-secondary small">{stateLabel}</div>
+            </div>
+          </CListGroupItem>
+        );
+      })}
+    </CListGroup>
   );
 }
 
@@ -910,7 +1563,7 @@ function DataTable<T extends Record<string, unknown>>({
   );
 }
 
-function RiskBadge({ level }: { level: RiskLevel }) {
+export function RiskBadge({ level }: { level: RiskLevel }) {
   const colorByLevel: Record<RiskLevel, "success" | "info" | "warning" | "danger"> = {
     LOW: "success",
     MEDIUM: "info",

@@ -32,6 +32,62 @@ flowchart TD
     I --> C
 ```
 
+<h2 align="center">Running the Scoring Service</h2>
+
+Prerequisites:
+
+* JDK 17;
+* RabbitMQ for pipeline event consumption;
+* free local port `8083` when running together with the Go upload service.
+
+If RabbitMQ is not already running, start the shared local broker from the upload-service compose file:
+
+```bash
+cd backend/upload-service
+docker compose up -d rabbitmq
+```
+
+Run tests:
+
+```bash
+cd backend/scoring-service
+./gradlew test
+```
+
+Run locally on port `8083`:
+
+```bash
+cd backend/scoring-service
+SERVER_PORT=8083 \
+SPRING_RABBITMQ_HOST=localhost \
+SPRING_RABBITMQ_PORT=5672 \
+SPRING_RABBITMQ_USERNAME=guest \
+SPRING_RABBITMQ_PASSWORD=guest \
+./gradlew bootRun
+```
+
+If the service is started without `SERVER_PORT`, it uses the port configured in `src/main/resources/application.yml`.
+
+Health check:
+
+```bash
+curl http://localhost:8083/api/scoring/health
+```
+
+Load demo suspicious approvals:
+
+```bash
+curl http://localhost:8083/api/scoring/datasets/demo/suspicious-approvals
+```
+
+Load demo refund approval details:
+
+```bash
+curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/details
+```
+
+The scoring service consumes `refund.relations.built` from `pipeline.exchange` and publishes `refund.scoring.completed` or `pipeline.failed`.
+
 <h2 align="center">API Endpoints</h2>
 
 ```text

@@ -9,5 +9,5 @@ data class ScoringCompletedEvent(
     val suspiciousApprovalsCount: Int,
     val status: String = "COMPLETED",
     val eventType: String = "refund.scoring.completed",
-    val publishedAt: Instant
+    val timestamp: Instant
 )

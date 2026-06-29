@@ -4,5 +4,6 @@ data class RelationsBuiltEvent(
     val datasetId: String,
     val jobId: String? = null,
     val relationsCount: Int = 0,
-    val publishedAt: String? = null
+    val featuresReady: Boolean = true,
+    val timestamp: String? = null
 )
