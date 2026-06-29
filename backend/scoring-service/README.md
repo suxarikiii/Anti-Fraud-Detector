@@ -86,17 +86,49 @@ Load demo refund approval details:
 curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/details
 ```
 
+Load demo support agent summary:
+
+```bash
+curl http://localhost:8083/api/scoring/datasets/demo/agents/agent_999/risk-summary
+```
+
+Gateway smoke commands, when the root compose stack is running:
+
+```bash
+curl http://localhost:8080/api/scoring/health
+curl http://localhost:8080/api/scoring/datasets/demo/suspicious-approvals
+curl http://localhost:8080/api/scoring/datasets/demo/returns/return_3041/details
+curl http://localhost:8080/api/scoring/datasets/demo/agents/agent_999/risk-summary
+```
+
 The scoring service consumes `refund.relations.built` from `pipeline.exchange` and publishes `refund.scoring.completed` or `pipeline.failed`.
+
+Relation feature integration is event-ready for the MVP. Until relation features
+are persisted in scoring, the service derives these feature names from the CSV:
+`customerReturnCount`, `agentApprovalRate`, `customerAgentPairCount`, `clusterSize`,
+`refundAmountRatio`, and `strongestRelationType`. Responses mark this as
+`featureSource: "CSV_DERIVED_FALLBACK"`.
 
 <h2 align="center">API Endpoints</h2>
 
 ```text
 GET /api/scoring/health
 GET /api/scoring/datasets/{datasetId}/suspicious-approvals
+GET /api/scoring/datasets/{datasetId}/returns/{returnId}/risk
+GET /api/scoring/datasets/{datasetId}/returns/{returnId}/details
+GET /api/scoring/datasets/{datasetId}/agents/{agentId}/risk-summary
 GET /api/scoring/returns/{returnId}/risk
 GET /api/scoring/agents/{agentId}/risk-summary
 POST /api/scoring/datasets/{datasetId}/recalculate
 ```
+
+The dataset-scoped endpoints are the stable frontend contract. The older
+`/api/scoring/returns/{returnId}/risk` and `/api/scoring/agents/{agentId}/risk-summary`
+routes are kept for demo compatibility and use the `demo` dataset internally.
+
+Unknown literal dataset IDs and return IDs return JSON `404` responses. Uploaded
+UUID dataset IDs currently use the same CSV-derived fallback data until normalized
+dataset storage is connected to scoring.
 
 <h2 align="center">Risk Factors</h2>
 
@@ -126,6 +158,9 @@ SUSPICIOUS_CLUSTER
 | REPEATED_AGENT_CUSTOMER_PAIR | Same agent repeatedly approves same customer | +25 |
 | SUSPICIOUS_CLUSTER | Approval belongs to suspicious graph cluster | +25 |
 
+Rules are evaluated in the table order so `topReason` and the `reasons` array are
+deterministic for the same input. Scores above `100` are capped at `100`.
+
 <h2 align="center">Risk Levels</h2>
 
 ```text
@@ -153,11 +188,13 @@ refund.scoring.completed
 
 ```json
 {
+  "datasetId": "demo",
   "returnId": "return_123",
   "orderId": "order_456",
   "customerId": "customer_789",
   "supportAgentId": "agent_001",
   "refundAmount": 249.99,
+  "orderAmount": 299.99,
   "decision": "APPROVED",
   "riskScore": 84,
   "riskLevel": "HIGH",
@@ -178,6 +215,16 @@ refund.scoring.completed
       "message": "Support agent approval rate is unusually high",
       "scoreImpact": 30
     }
-  ]
+  ],
+  "calculatedAt": "2026-06-01T10:15:00Z"
 }
 ```
+
+<h2 align="center">Demo Return IDs</h2>
+
+| returnId | Expected Level | Main Reasons | Explanation |
+| --- | --- | --- | --- |
+| `return_300347` | LOW | none expected | Normal approval with evidence and no repeated relation pattern. |
+| `return_303075` | MEDIUM | `NO_EVIDENCE`, `HIGH_VALUE_REFUND` | High-value refund approved without evidence. |
+| `return_3011` | CRITICAL | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FULL_AMOUNT_REFUND` | Full refund of a high-value order without evidence. |
+| `return_3041` | CRITICAL | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FAST_APPROVAL`, `MANUAL_OVERRIDE`, relation pattern rules | Repeated customer-agent pattern with manual overrides and high-value fast approvals. |

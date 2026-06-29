@@ -22,7 +22,15 @@ class RefundDatasetRepository {
     }
 
     fun findByDatasetId(datasetId: String): List<RefundApprovalRecord> {
+        if (!isSupportedDatasetId(datasetId)) {
+            return emptyList()
+        }
+
         return findAll()
+    }
+
+    private fun isSupportedDatasetId(datasetId: String): Boolean {
+        return datasetId == "demo" || UUID_REGEX.matches(datasetId)
     }
 
     private fun parseLine(line: String): RefundApprovalRecord {
@@ -66,5 +74,11 @@ class RefundDatasetRepository {
             ?: error("clean_refund_dataset.csv was not found. " +
                     "Tried paths: ${possiblePaths.joinToString(", ") 
                     { it.toString() }}")
+    }
+
+    private companion object {
+        val UUID_REGEX = Regex(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        )
     }
 }

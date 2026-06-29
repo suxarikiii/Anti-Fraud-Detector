@@ -9,8 +9,12 @@ import kotlin.test.assertTrue
 
 class ScoringServiceTest {
 
+    private val riskRuleEngine = RiskRuleEngine(ExplanationBuilder())
+
     private val scoringService = ScoringService(
-        refundDatasetRepository = RefundDatasetRepository()
+        refundDatasetRepository = RefundDatasetRepository(),
+        featureProvider = CsvDerivedFeatureProvider(),
+        riskRuleEngine = riskRuleEngine
     )
 
     @Test
@@ -19,8 +23,11 @@ class ScoringServiceTest {
 
         assertTrue(approvals.isNotEmpty())
         assertTrue(approvals.all { it.riskScore >= 31 })
+        assertTrue(approvals.zipWithNext().all { (left, right) -> left.riskScore >= right.riskScore })
         assertTrue(approvals.any { it.returnId == "return_3011" })
         assertTrue(approvals.any { it.returnId == "return_3041" })
+        assertTrue(approvals.all { it.datasetId == "demo" })
+        assertTrue(approvals.all { it.reasons.isNotEmpty() })
     }
 
     @Test
@@ -36,6 +43,7 @@ class ScoringServiceTest {
         assertTrue(risk.reasons.any { it.type == "NO_EVIDENCE" })
         assertTrue(risk.reasons.any { it.type == "HIGH_VALUE_REFUND" })
         assertTrue(risk.reasons.any { it.type == "FULL_AMOUNT_REFUND" })
+        assertTrue(risk.topReason.isNotBlank())
     }
 
     @Test
@@ -47,6 +55,7 @@ class ScoringServiceTest {
         assertEquals(100, risk.riskScore)
 
         assertTrue(risk.reasons.any { it.type == "NO_EVIDENCE" })
+        assertTrue(risk.reasons.any { it.type == "FAST_APPROVAL" })
         assertTrue(risk.reasons.any { it.type == "MANUAL_OVERRIDE" })
         assertTrue(risk.reasons.any { it.type == "AGENT_HIGH_APPROVAL_RATE" })
         assertTrue(risk.reasons.any { it.type == "CUSTOMER_FREQUENT_RETURNS" })
@@ -68,8 +77,13 @@ class ScoringServiceTest {
         val summary = scoringService.getAgentRiskSummary("agent_777")
 
         assertEquals("agent_777", summary.agentId)
+        assertEquals("demo", summary.datasetId)
+        assertTrue(summary.totalReturns > 0)
+        assertTrue(summary.totalApprovals > 0)
         assertTrue(summary.suspiciousApprovalsCount > 0)
         assertTrue(summary.averageRiskScore > 0.0)
+        assertTrue(summary.approvalRate > 0.0)
+        assertTrue(summary.topRiskReasons.isNotEmpty())
         assertTrue(summary.topReason.isNotBlank())
     }
 
@@ -87,10 +101,15 @@ class ScoringServiceTest {
         val summary = scoringService.getAgentRiskSummary("unknown_agent")
 
         assertEquals("unknown_agent", summary.agentId)
+        assertEquals("demo", summary.datasetId)
+        assertEquals(0, summary.totalReturns)
+        assertEquals(0, summary.totalApprovals)
         assertEquals(0, summary.suspiciousApprovalsCount)
         assertEquals(0.0, summary.averageRiskScore)
         assertEquals(0, summary.highRiskApprovalsCount)
         assertEquals(0, summary.criticalRiskApprovalsCount)
+        assertEquals(0.0, summary.approvalRate)
+        assertTrue(summary.topRiskReasons.isEmpty())
         assertEquals("No refund approvals found for this support agent", summary.topReason)
     }
 
@@ -140,5 +159,18 @@ class ScoringServiceTest {
         assertEquals(RiskLevel.CRITICAL, details.riskLevel)
         assertEquals(100, details.riskScore)
         assertTrue(details.reasons.isNotEmpty())
+        assertEquals("CSV_DERIVED_FALLBACK", details.relationFeatures.featureSource)
+        assertTrue(details.relationFeatures.customerReturnCount >= 5)
+    }
+
+    @Test
+    fun `should support uploaded UUID datasets through CSV fallback`() {
+        val details = scoringService.getReturnDetails(
+            "123e4567-e89b-12d3-a456-426614174000",
+            "return_3041"
+        )
+
+        assertEquals("123e4567-e89b-12d3-a456-426614174000", details.datasetId)
+        assertEquals("return_3041", details.returnId)
     }
 }

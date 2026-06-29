@@ -4,6 +4,7 @@ import org.springframework.amqp.core.Queue
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.BindingBuilder
 import org.springframework.amqp.core.TopicExchange
+import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
@@ -36,5 +37,10 @@ class RabbitMqConfig {
             .bind(relationsBuiltQueue)
             .to(pipelineExchange)
             .with("refund.relations.built")
+    }
+
+    @Bean
+    fun jsonMessageConverter(): Jackson2JsonMessageConverter {
+        return Jackson2JsonMessageConverter()
     }
 }
