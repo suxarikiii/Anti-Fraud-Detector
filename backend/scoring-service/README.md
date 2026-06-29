@@ -20,11 +20,10 @@ flowchart TD
     A[Graph / Relations Service] -->|publish refund.relations.built| B[RabbitMQ Topic Exchange]
     B -->|consume refund.relations.built| C[Scoring Service]
 
-    C --> D[Read refund relation features]
+    C --> D[Read CSV-derived fallback features]
     D --> E[Rule-based refund approval scoring]
     E --> F[Risk score + risk level + explanations]
 
-    F -->|save scores / explanations| G[(PostgreSQL)]
     C -->|publish refund.scoring.completed| B
     C -->|on error publish pipeline.failed| B
 
@@ -52,6 +51,20 @@ Run tests:
 ```bash
 cd backend/scoring-service
 ./gradlew test
+```
+
+Run full local build:
+
+```bash
+cd backend/scoring-service
+./gradlew clean build
+```
+
+Build and run with the root compose stack:
+
+```bash
+docker compose build scoring-service
+docker compose up -d scoring-service
 ```
 
 Run locally on port `8083`:
@@ -228,3 +241,10 @@ refund.scoring.completed
 | `return_303075` | MEDIUM | `NO_EVIDENCE`, `HIGH_VALUE_REFUND` | High-value refund approved without evidence. |
 | `return_3011` | CRITICAL | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FULL_AMOUNT_REFUND` | Full refund of a high-value order without evidence. |
 | `return_3041` | CRITICAL | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FAST_APPROVAL`, `MANUAL_OVERRIDE`, relation pattern rules | Repeated customer-agent pattern with manual overrides and high-value fast approvals. |
+
+<h2 align="center">Known Limitations</h2>
+
+* Scores are calculated from the current CSV-backed dataset and are not persisted.
+* Uploaded UUID dataset IDs use CSV-derived fallback data until normalized dataset storage is connected to scoring.
+* Relation-style fields are mirrored from CSV-derived features. Full relation-feature storage and handoff from Relations Service remains a follow-up integration task.
+* Gateway smoke commands require the full root compose stack.
