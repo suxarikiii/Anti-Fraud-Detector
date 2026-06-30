@@ -357,8 +357,12 @@ class RefundDatasetGenerator:
         ]
         # Frequent returners (scenario 6).
         self.frequent_customers = [f"customer_90{idx:02d}" for idx in range(1, 9)]
-        # Large normal customer pool (reused -> many orders per customer).
-        self.normal_customers = [f"customer_{idx:04d}" for idx in range(1, 601)]
+        # Large normal customer pool. Sized so that a typical legitimate
+        # customer has only ~1-2 returns and therefore does NOT cross the
+        # scoring service's CUSTOMER_FREQUENT_RETURNS / SUSPICIOUS_CLUSTER
+        # thresholds (>=5). Frequent-returner behaviour stays exclusive to
+        # scenario 6. This keeps the normal class from being over-flagged.
+        self.normal_customers = [f"customer_{idx:04d}" for idx in range(1, 2001)]
 
     # ---- pools ---------------------------------------------------------- #
 
