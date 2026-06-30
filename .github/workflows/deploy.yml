@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: deploy
@@ -49,18 +50,26 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-      name: Deploy
-      needs: build-and-push
-      runs-on: self-hosted
-      steps:
-        - uses: actions/checkout@v4
-        - name: Deploy
-          run: |
-            mkdir -p ~/anti-fraud/backend/gateway
-            cp docker-compose.yml .env.example ~/anti-fraud/
-            cp backend/gateway/nginx.conf ~/anti-fraud/backend/gateway/
-            cd ~/anti-fraud
-            [ -f .env ] || cp .env.example .env
-            docker compose pull
-            docker compose up -d --no-build --remove-orphans
-            docker image prune -f
+    name: Deploy
+    needs: build-and-push
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        run: |
+          mkdir -p ~/anti-fraud/backend/gateway
+          cp docker-compose.yml .env.example ~/anti-fraud/
+          cp backend/gateway/nginx.conf ~/anti-fraud/backend/gateway/
+          cd ~/anti-fraud
+          [ -f .env ] || cp .env.example .env
+          docker compose pull
+          docker compose up -d --no-build --remove-orphans
+          docker image prune -f
+      - name: Verify deployment
+        run: |
+          sleep 10
+          echo "Checking Gateway health..."
+          curl -f http://localhost:8080/health || (echo "Gateway health check failed" && exit 1)
+          echo "Checking Frontend availability..."
+          curl -f http://localhost:3000 || (echo "Frontend not reachable" && exit 1)
+          echo "All services are healthy!"
