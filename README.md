@@ -90,26 +90,26 @@ Our system solves this problem by combining:
 
 ```mermaid
 flowchart LR
-    FE[Frontend Dashboard] -->|REST / HTTP| NGINX[Nginx Reverse Proxy]
+    FE["Frontend Dashboard"] -->|"REST / HTTP"| NGINX["Nginx Reverse Proxy"]
 
-    NGINX -->|REST| UPLOAD[Upload / Ingestion Service<br/>Go, Amir]
-    NGINX -->|REST| SCORE[Scoring API Service<br/>Kotlin, Ernest]
-    NGINX -->|REST| REL[Relations API Service<br/>Go, Nikita]
-    NGINX -->|REST| STATUS[Analysis Status API<br/>Upload Service]
+    NGINX -->|"REST"| UPLOAD["Upload / Ingestion Service<br/>Go, Amir"]
+    NGINX -->|"REST"| SCORE["Scoring API Service<br/>Kotlin, Ernest"]
+    NGINX -->|"REST"| REL["Relations API Service<br/>Go, Nikita"]
+    NGINX -->|"REST"| STATUS["Analysis Status API<br/>Upload Service"]
 
-    UPLOAD --> PG[(PostgreSQL)]
+    UPLOAD --> PG[("PostgreSQL")]
     STATUS --> PG
 
-    UPLOAD -->|publish: dataset.uploaded| MQ[(RabbitMQ pipeline.exchange)]
+    UPLOAD -->|"publish: dataset.uploaded"| MQ[("RabbitMQ pipeline.exchange")]
 
-    MQ -. planned/partial .-> ML[ML / Normalization<br/>not a current Compose service]
-    ML -. publish: dataset.normalized .-> MQ
+    MQ -.->|"planned / partial"| ML["ML / Normalization<br/>not a current Compose service"]
+    ML -.->|"publish: dataset.normalized"| MQ
 
-    MQ -->|consume: dataset.normalized| REL
-    REL -->|publish: refund.relations.built| MQ
+    MQ -->|"consume: dataset.normalized"| REL
+    REL -->|"publish: refund.relations.built"| MQ
 
-    MQ -->|consume: refund.relations.built| SCORE
-    SCORE -->|publish: refund.scoring.completed| MQ
+    MQ -->|"consume: refund.relations.built"| SCORE
+    SCORE -->|"publish: refund.scoring.completed"| MQ
 ```
 
 Implemented in the current Compose MVP:
