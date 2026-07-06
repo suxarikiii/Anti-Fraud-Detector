@@ -308,7 +308,8 @@ func validateUploadedCSV(filename string, data []byte) error {
 		record = trimRecord(record)
 		rows++
 
-		for semanticName, index := range columns {
+		for _, semanticName := range requiredSemanticColumns {
+			index := columns[semanticName]
 			if index >= len(record) || strings.TrimSpace(record[index]) == "" {
 				return &InvalidUploadError{Message: fmt.Sprintf("row %d has empty required field %s", rows+1, semanticName)}
 			}
@@ -371,7 +372,11 @@ func validateNumericField(record []string, columns map[string]int, semanticName 
 	if !ok {
 		return nil
 	}
-	value, err := strconv.ParseFloat(strings.TrimSpace(record[index]), 64)
+	rawValue := strings.TrimSpace(record[index])
+	if rawValue == "" && !mustBePositive {
+		return nil
+	}
+	value, err := parseFlexibleFloat(rawValue)
 	if err != nil {
 		return &InvalidUploadError{Message: fmt.Sprintf("row %d has invalid numeric value for %s", rowNumber, semanticName)}
 	}
@@ -390,12 +395,36 @@ func validateTimestampField(record []string, columns map[string]int, rowNumber i
 		return nil
 	}
 	value := strings.TrimSpace(record[index])
-	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02", "02.01.2006 15:04", "01/02/2006 15:04"} {
 		if _, err := time.Parse(layout, value); err == nil {
 			return nil
 		}
 	}
 	return &InvalidUploadError{Message: fmt.Sprintf("row %d has invalid timestamp", rowNumber)}
+}
+
+func parseFlexibleFloat(value string) (float64, error) {
+	var cleaned strings.Builder
+	for _, r := range strings.TrimSpace(value) {
+		if (r >= '0' && r <= '9') || r == '.' || r == ',' || r == '-' {
+			cleaned.WriteRune(r)
+		}
+	}
+
+	normalized := cleaned.String()
+	lastDot := strings.LastIndex(normalized, ".")
+	lastComma := strings.LastIndex(normalized, ",")
+	switch {
+	case lastDot >= 0 && lastComma >= 0 && lastComma > lastDot:
+		normalized = strings.ReplaceAll(normalized, ".", "")
+		normalized = strings.ReplaceAll(normalized, ",", ".")
+	case lastDot >= 0 && lastComma >= 0:
+		normalized = strings.ReplaceAll(normalized, ",", "")
+	case lastComma >= 0:
+		normalized = strings.ReplaceAll(normalized, ",", ".")
+	}
+
+	return strconv.ParseFloat(normalized, 64)
 }
 
 func trimRecord(record []string) []string {
@@ -429,18 +458,22 @@ var headerAliases = map[string]string{
 	"purchase_id":           "order_id",
 	"customer_id":           "customer_id",
 	"buyer_id":              "customer_id",
+	"client_id":             "customer_id",
 	"return_id":             "return_id",
 	"refund_request_id":     "return_id",
 	"support_agent_id":      "support_agent_id",
 	"agent_id":              "support_agent_id",
+	"support_user_id":       "support_agent_id",
 	"order_amount":          "order_amount",
 	"purchase_amount":       "order_amount",
 	"refund_amount":         "refund_amount",
 	"return_amount":         "refund_amount",
 	"decision":              "decision",
 	"status":                "decision",
+	"approval_status":       "decision",
 	"timestamp":             "timestamp",
 	"created_at":            "timestamp",
+	"decision_time":         "timestamp",
 	"decision_time_minutes": "decision_time_minutes",
 	"resolution_minutes":    "decision_time_minutes",
 }
