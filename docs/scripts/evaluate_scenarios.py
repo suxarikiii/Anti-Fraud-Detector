@@ -42,9 +42,9 @@ from typing import Dict, List, Tuple
 # the matched rules' impacts, clamped to 0..100, then bucketed into a risk level.
 # --------------------------------------------------------------------------- #
 
-HIGH_VALUE_RATIO = 0.70          # refund/order ratio >=  -> HIGH_VALUE_REFUND (+20)
+HIGH_VALUE_REFUND_AMOUNT = 500.0 # refund amount >=       -> HIGH_VALUE_REFUND (+20)
 FULL_AMOUNT_RATIO = 0.95         # refund/order ratio >=  -> FULL_AMOUNT_REFUND (+15)
-FAST_APPROVAL_MINUTES = 3        # decision time (min) <=  -> FAST_APPROVAL      (+15)
+FAST_APPROVAL_MINUTES = 5        # APPROVED decision time <= -> FAST_APPROVAL   (+15)
 AGENT_MIN_DECISIONS = 5          # agent needs >= this many decisions for the rate rule to apply
 AGENT_HIGH_RATE = 0.85           # agent approval rate >   -> AGENT_HIGH_APPROVAL_RATE (+30)
 CUSTOMER_FREQUENT = 5            # customer return count >= -> CUSTOMER_FREQUENT_RETURNS (+20)
@@ -141,12 +141,11 @@ class ScoringEngine:
         # Per-record rules.
         if r.decision == "APPROVED" and not r.evidence_provided:
             out.append(("NO_EVIDENCE", 25))
-        if ratio >= HIGH_VALUE_RATIO:
+        if r.refund_amount >= HIGH_VALUE_REFUND_AMOUNT:
             out.append(("HIGH_VALUE_REFUND", 20))
         if ratio >= FULL_AMOUNT_RATIO:
             out.append(("FULL_AMOUNT_REFUND", 15))
-        if r.decision_time_minutes <= FAST_APPROVAL_MINUTES:
-            # NOTE: mirrors the service — this fires regardless of decision.
+        if r.decision == "APPROVED" and r.decision_time_minutes <= FAST_APPROVAL_MINUTES:
             out.append(("FAST_APPROVAL", 15))
         if r.manual_override:
             out.append(("MANUAL_OVERRIDE", 20))
@@ -240,7 +239,7 @@ def build_expected(engine: ScoringEngine, by_return: Dict[str, Record]) -> List[
 
 def write_expected(path: Path, rows: List[Dict[str, str]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=EXPECTED_COLUMNS)
+        writer = csv.DictWriter(fh, fieldnames=EXPECTED_COLUMNS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
