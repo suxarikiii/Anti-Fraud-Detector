@@ -17,10 +17,11 @@ class RabbitTopologyInitializer(
 
     @EventListener(ApplicationReadyEvent::class)
     fun initializeTopology() {
-        val connection = connectionFactory.createConnection()
+        var connection: org.springframework.amqp.rabbit.connection.Connection? = null
         var channel: Channel? = null
 
         try {
+            connection = connectionFactory.createConnection()
             channel = connection.createChannel(false)
             channel.queueDeclare(
                 RabbitMqConfig.REFUND_RELATIONS_BUILT_QUEUE,
@@ -42,7 +43,7 @@ class RabbitTopologyInitializer(
                 channel?.close()
             } catch (_: Exception) {
             }
-            connection.close()
+            connection?.close()
         }
     }
 

@@ -1,150 +1,68 @@
 <h1 align="center">Demo Flow</h1>
 
-This document describes the MVP demo scenario for Fraud & Abuse Detection System.
+The demo shows the analyst path from refund dataset upload to investigation of a suspicious approval.
 
-The demo focuses on suspicious refund approvals in e-commerce support workflows.
-
-<h2 align="center">Main Flow</h2>
+## Main Scenario
 
 1. Open the frontend dashboard.
-2. Upload a CSV dataset with orders, return requests, and support decisions.
-3. Show dataset preview.
-4. Show column mapping.
-5. Start analysis.
-6. Show analysis status:
+2. Upload `data/clean_refund_dataset.csv` or `data/dirty_business_refund_dataset.csv`.
+3. Review preview/mapping.
+4. Start analysis and show statuses:
 
 ```text
-UPLOADED
-NORMALIZING
-NORMALIZED
-BUILDING_RELATIONS
-SCORING
-COMPLETED
+UPLOADED -> NORMALIZING -> NORMALIZED -> BUILDING_RELATIONS -> SCORING -> COMPLETED
 ```
 
-7. Open suspicious refund approvals dashboard.
-8. Show a table with:
+5. Open suspicious approvals.
+6. Filter/search by return ID, customer, agent, or risk level.
+7. Open a high-risk return and explain the risk score, reasons, customer behavior, agent behavior, and related approvals.
 
-```text
-returnId
-orderId
-customerId
-supportAgentId
-refundAmount
-decision
-riskScore
-riskLevel
-topReason
-```
+## Screenshots
 
-9. Open one suspicious approval.
-10. Show:
+| Screen | File |
+| --- | --- |
+| Dataset upload / status | [01-dataset-upload.png](./assets/screenshots/01-dataset-upload.png) |
+| Suspicious approvals | [02-suspicious-approvals.png](./assets/screenshots/02-suspicious-approvals.png) |
+| Refund investigation | [03-refund-investigation.png](./assets/screenshots/03-refund-investigation.png) |
 
-* risk score;
-* risk level;
-* explanations;
-* customer return history;
-* support agent approval behavior;
-* related orders or refund requests.
+## Demo Return IDs
 
-11. Explain why the approval is suspicious.
+| Case | returnId | Expected Score / Level | Main Reasons |
+| --- | --- | --- | --- |
+| Normal / low | `return_3001` | `15 LOW` | `FULL_AMOUNT_REFUND` |
+| Medium | `return_303075` | `45 MEDIUM` | `NO_EVIDENCE`, `HIGH_VALUE_REFUND` |
+| High | `return_3006` | `75 HIGH` | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `AGENT_HIGH_APPROVAL_RATE` |
+| Critical | `return_3041` | `100 CRITICAL` | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FAST_APPROVAL`, `MANUAL_OVERRIDE`, relation pattern rules |
 
----
+## Smoke Commands
 
-<h2 align="center">Upload Service Smoke Commands</h2>
-
-Run from the repository root after `docker-compose up --build`:
+Run the full stack:
 
 ```bash
-backend/upload-service/scripts/smoke_gateway.sh
+docker compose up --build
 ```
 
-Equivalent manual commands:
+Upload and status:
 
 ```bash
 curl -s http://localhost:8080/api/datasets/health
-
-curl -s -F "file=@data/clean_refund_dataset.csv" \
-  http://localhost:8080/api/datasets/upload
-
-curl -s -F "file=@data/dirty_business_refund_dataset.csv" \
-  http://localhost:8080/api/datasets/upload
-
+curl -s -F "file=@data/clean_refund_dataset.csv" http://localhost:8080/api/datasets/upload
 curl -s http://localhost:8080/api/datasets/<datasetId>/preview
-
 curl -s -X POST http://localhost:8080/api/analysis/<datasetId>/start
-
 curl -s http://localhost:8080/api/analysis/<jobId>/status
-
-curl -s -X PATCH http://localhost:8080/api/analysis/<jobId>/status \
-  -H "Content-Type: application/json" \
-  -d '{"status":"COMPLETED"}'
 ```
 
----
-
-<h2 align="center">User Flow Diagram</h2>
-
-```mermaid
-flowchart TD
-    A[Analyst opens Frontend Dashboard] --> B[Upload Dataset Page]
-
-    B --> C[Upload e-commerce refund dataset]
-    C --> D[Dataset Preview Page]
-
-    D --> E[Review uploaded rows]
-    E --> F[Review or confirm column mapping]
-
-    F --> G[Start Analysis]
-    G --> H[Analysis Status Page]
-
-    H --> S1[UPLOADED]
-    S1 --> S2[NORMALIZING]
-    S2 --> S3[NORMALIZED]
-    S3 --> S4[BUILDING_RELATIONS]
-    S4 --> S5[SCORING]
-    S5 --> S6[COMPLETED]
-
-    S6 --> I[Suspicious Refund Approvals Dashboard]
-
-    I --> J[View suspicious approvals table]
-    J --> K[Select one suspicious refund approval]
-
-    K --> L[Refund Approval Details Page]
-
-    L --> M[Risk Score]
-    L --> N[Risk Level]
-    L --> O[Explanation Reasons]
-    L --> P[Order Details]
-    L --> Q[Return Request Details]
-    L --> R[Customer Return History]
-    L --> T[Support Agent Approval Behavior]
-    L --> U[Related Refund Approvals]
-
-    M --> V[Analyst understands why approval is suspicious]
-    N --> V
-    O --> V
-    P --> V
-    Q --> V
-    R --> V
-    T --> V
-    U --> V
-```
-
----
-
-<h2 align="center">Example Investigation Narrative</h2>
-
-An analyst opens a high-risk refund approval and sees that the refund was approved in two minutes, had no evidence, used a manual override, and refunded almost the full order amount. The same support agent also has an unusually high approval rate and has repeatedly approved refunds for the same customer.
-
-<h2 align="center">Demo Scoring Checks</h2>
+Scoring checks:
 
 ```bash
-curl http://localhost:8083/api/scoring/health
-curl http://localhost:8083/api/scoring/datasets/demo/suspicious-approvals
-curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/risk
-curl http://localhost:8083/api/scoring/returns/return_3041/risk
-curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/details
-curl http://localhost:8083/api/scoring/datasets/demo/agents/agent_777/risk-summary
-curl http://localhost:8083/api/scoring/agents/agent_777/risk-summary
+curl http://localhost:8080/api/scoring/health
+curl http://localhost:8080/api/scoring/datasets/demo/suspicious-approvals
+curl http://localhost:8080/api/scoring/datasets/demo/returns/return_3001/risk
+curl http://localhost:8080/api/scoring/datasets/demo/returns/return_303075/risk
+curl http://localhost:8080/api/scoring/datasets/demo/returns/return_3006/risk
+curl http://localhost:8080/api/scoring/datasets/demo/returns/return_3041/details
 ```
+
+## Narrative
+
+For `return_3041`, the analyst sees a critical case: the refund was approved without evidence, was high value, was approved quickly, used manual override, and belongs to repeated customer-agent relation patterns. This is enough context to send the case to manual review.
