@@ -1,6 +1,6 @@
 <h1 align="center">Upload Service</h1>
 
-The Upload Service handles CSV dataset upload, MinIO file storage, PostgreSQL dataset records, analysis job creation, preview API, and RabbitMQ event publishing.
+The Upload Service handles CSV dataset upload, MinIO file storage, PostgreSQL dataset records, analysis job creation, preview API, and RabbitMQ pipeline exchange publishing (`pipeline.exchange`).
 
 <h2 align="center">Running the Upload Service</h2>
 

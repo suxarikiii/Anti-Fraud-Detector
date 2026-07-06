@@ -6,9 +6,9 @@
 
 ---
 
-<h2 align="center">Week 4 Status</h2>
+<h2 align="center">Current Status</h2>
 
-Week 4 stabilizes the relation feature contract for Scoring Service and frontend integration.
+The current MVP stabilizes the relation feature contract for Scoring Service and frontend integration.
 
 What works now:
 
@@ -16,10 +16,10 @@ What works now:
 * health endpoint is available on `:8082`;
 * `/api/relations/returns/{returnId}/features` calculates features from normalized refund records;
 * `/api/relations/datasets/{datasetId}/returns/{returnId}/features` provides a dataset-aware feature endpoint;
-* all demo return IDs from `data/clean_refund_dataset.csv` are supported: `return_3001` through `return_3045`;
+* return IDs from `data/clean_refund_dataset.csv` are supported for the local demo dataset;
 * RabbitMQ consumer stub listens for `dataset.normalized` when `RABBITMQ_ENABLED=true`;
 * rebuild flow publishes `refund.relations.built` with `datasetId`, `jobId`, `relationsCount`, and `featuresCount`;
-* Graph DB is intentionally left for future integration.
+* dedicated Graph DB storage is not connected and remains future/optional MVP work.
 
 ---
 
@@ -27,7 +27,7 @@ What works now:
 
 ```text
 dataset.uploaded
-  -> normalization service
+  -> planned normalization stage
 dataset.normalized
   -> relations-service
 refund.relations.built
@@ -40,9 +40,9 @@ refund.scoring.completed
 
 <h2 align="center">Normalized Input Contract</h2>
 
-Relations Service expects normalized refund records produced by ML / Normalization Service.
+Relations Service expects normalized refund records. In the current demo, normalization is represented by prepared clean/dirty datasets, mapping documentation, and validation artifacts; a separate ML / Normalization Service is planned but not part of the current root Compose stack.
 
-Week 4 canonical record shape:
+Canonical record shape:
 
 ```json
 {
@@ -58,7 +58,7 @@ Week 4 canonical record shape:
   "refundAmount": 420.0,
   "orderAmount": 520.0,
   "manualOverride": true,
-  "decisionTimeMs": 3900
+  "decisionTimeMinutes": 4
 }
 ```
 
@@ -74,6 +74,7 @@ Required fields for feature generation:
 * `refundAmount: number`
 * `orderAmount: number`
 * `manualOverride: boolean`
+* `decisionTimeMinutes: integer`
 
 ---
 
@@ -222,7 +223,7 @@ backend/relations-service/testdata/return_3041_features.json
 
 <h2 align="center">RabbitMQ Contract</h2>
 
-RabbitMQ is optional for local REST-only development.
+RabbitMQ pipeline exchange: `pipeline.exchange`. RabbitMQ is optional for local REST-only development.
 
 Enable RabbitMQ:
 
@@ -338,9 +339,9 @@ RabbitMQ integration is available as a local/demo stub through `POST /api/relati
 
 ---
 
-<h2 align="center">Graph DB Integration</h2>
+<h2 align="center">Graph DB Status</h2>
 
-Graph DB is not connected in Week 4.
+Relations Service currently computes graph-style relation features through service logic and API contracts. Dedicated Graph DB storage is not connected yet and remains optional/future work for the MVP.
 
 Future work should replace or extend the CSV/in-memory builder with:
 

@@ -9,6 +9,7 @@ All frontend calls should go through the gateway using `/api/...`.
 | `GET` | `/api/datasets/health` | Upload service health. |
 | `POST` | `/api/datasets/upload` | Upload CSV refund dataset. |
 | `GET` | `/api/datasets/{datasetId}/preview` | Preview uploaded rows. |
+| `POST` | `/api/analysis/{datasetId}/start` | Start analysis for uploaded dataset. |
 | `GET` | `/api/analysis/{jobId}/status` | Read analysis status. |
 
 Status values:

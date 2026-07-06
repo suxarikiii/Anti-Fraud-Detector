@@ -48,9 +48,26 @@ python3 docs/scripts/evaluate_scenarios.py
 backend/upload-service/scripts/smoke_gateway.sh
 ```
 
+## Current CI Status
+
+| Area | Current workflow behavior |
+| --- | --- |
+| Upload Service | `go vet`, `go test -race -cover`, Docker build. |
+| Relations Service | `go vet`, `go test -race -cover`, Docker build. |
+| Scoring Service | `./gradlew build -x test`, Docker build. Tests are skipped in CI and should be re-enabled. |
+| Frontend | `npm ci`, `npm run build`, Docker build. Frontend tests are not yet part of CI. |
+| Compose | `docker compose config`. |
+
+## Deployment Status
+
+* Local Docker Compose: implemented.
+* VM deployment: pending updated public link and latest deployment verification.
+* Public URL: TODO.
+* Health checks must be added after deployment is verified.
+
 ## Deployment Notes
 
-CI/CD should test services, build Docker images, push commit-SHA/latest tags, and update the VM Compose stack.
+Future CD should build Docker images, push commit-SHA/latest tags, and update the VM Compose stack after verification.
 
 Required secrets:
 

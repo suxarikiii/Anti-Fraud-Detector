@@ -94,33 +94,25 @@ flowchart LR
 
     NGINX -->|REST| UPLOAD[Upload / Ingestion Service<br/>Go, Amir]
     NGINX -->|REST| SCORE[Scoring API Service<br/>Kotlin, Ernest]
-    NGINX -->|REST| REL[Graph / Relations API Service<br/>Go, Nikita]
+    NGINX -->|REST| REL[Relations API Service<br/>Go, Nikita]
     NGINX -->|REST| STATUS[Analysis Status API<br/>Upload Service]
 
     UPLOAD --> PG[(PostgreSQL)]
-    SCORE --> PG
-    REL --> PG
     STATUS --> PG
 
-    REL --> GDB[(Graph DB<br/>Neo4j / ArangoDB / other)]
+    UPLOAD -->|publish: dataset.uploaded| MQ[(RabbitMQ pipeline.exchange)]
 
-    UPLOAD -->|publish: dataset.uploaded| MQ[(RabbitMQ Topic Exchange)]
-
-    MQ -->|consume: dataset.uploaded| ML[ML / Normalization Service<br/>Anya]
-    ML --> PG
-    ML -->|publish: dataset.normalized| MQ
+    MQ -. planned/partial .-> ML[ML / Normalization<br/>not a current Compose service]
+    ML -. publish: dataset.normalized .-> MQ
 
     MQ -->|consume: dataset.normalized| REL
-    REL -->|build refund relations graph| GDB
-    REL -->|save refund relation features| PG
     REL -->|publish: refund.relations.built| MQ
 
     MQ -->|consume: refund.relations.built| SCORE
-    SCORE -->|save refund risk scores / explanations| PG
     SCORE -->|publish: refund.scoring.completed| MQ
 ```
 
-The MVP consists of the following main parts:
+Implemented in the current Compose MVP:
 
 <table align="center">
   <tr>
@@ -136,12 +128,8 @@ The MVP consists of the following main parts:
     <td align="center">Go service for uploading e-commerce refund datasets, creating analysis jobs, showing file preview, and publishing processing events to RabbitMQ</td>
   </tr>
   <tr>
-    <td align="center"><b>ML / Normalization</b></td>
-    <td align="center">Service for mapping raw business columns to internal entities such as orders, returns, customers, support agents, and refund decisions</td>
-  </tr>
-  <tr>
     <td align="center"><b>Graph / Relations</b></td>
-    <td align="center">Go service for building relationships between customers, orders, return requests, support agents, products, and suspicious refund patterns using Graph DB</td>
+    <td align="center">Go service that computes graph-style relation features through service logic and API contracts; dedicated Graph DB storage is not connected yet</td>
   </tr>
   <tr>
     <td align="center"><b>Scoring</b></td>
@@ -149,17 +137,23 @@ The MVP consists of the following main parts:
   </tr>
   <tr>
     <td align="center"><b>Storage</b></td>
-    <td align="center">PostgreSQL for datasets, analysis jobs, normalized events, refund approval features, scores, and explanations</td>
+    <td align="center">PostgreSQL for dataset/job storage in implemented backend services; persisted normalized records, relation features, scores, and explanations are follow-up integration points</td>
   </tr>
   <tr>
     <td align="center"><b>Messaging</b></td>
-    <td align="center">RabbitMQ direct exchange for asynchronous backend processing pipeline</td>
+    <td align="center">RabbitMQ pipeline exchange: <code>pipeline.exchange</code></td>
   </tr>
   <tr>
     <td align="center"><b>Deployment</b></td>
-    <td align="center">Docker-based deployment on VM so the project can be opened, tested, and demonstrated</td>
+    <td align="center">Local Docker Compose is implemented; VM/public deployment link is pending verification</td>
   </tr>
 </table>
+
+Planned / partially integrated:
+
+* ML / Normalization Service as a separate pipeline component.
+* For the current demo, normalization is represented by prepared clean/dirty datasets, mapping documentation, and validation artifacts.
+* Dedicated Graph DB storage remains optional/future work for the MVP.
 
 ---
 
@@ -211,7 +205,7 @@ flowchart LR
   </tr>
   <tr>
     <td align="center"><b>ML / Normalization</b></td>
-    <td align="center">Python</td>
+    <td align="center">Planned separate component; current demo uses prepared datasets and mapping docs</td>
   </tr>
   <tr>
     <td align="center"><b>Database</b></td>
@@ -219,15 +213,15 @@ flowchart LR
   </tr>
   <tr>
     <td align="center"><b>Graph Storage</b></td>
-    <td align="center">Graph DB: Neo4j / ArangoDB / other</td>
+    <td align="center">Not connected in current MVP; optional future storage</td>
   </tr>
   <tr>
     <td align="center"><b>Messaging</b></td>
-    <td align="center">RabbitMQ with Topic Exchange</td>
+    <td align="center">RabbitMQ pipeline exchange: <code>pipeline.exchange</code></td>
   </tr>
   <tr>
     <td align="center"><b>Deployment</b></td>
-    <td align="center">Docker, Docker Compose, VM</td>
+    <td align="center">Docker Compose local stack; VM deployment pending verification</td>
   </tr>
 
   <tr>
@@ -366,10 +360,10 @@ The pipeline:
 1. Upload service receives a dataset.
 2. Upload service creates an analysis job.
 3. Upload service publishes `dataset.uploaded`.
-4. ML / Normalization service consumes `dataset.uploaded`.
-5. ML / Normalization service saves normalized data and publishes `dataset.normalized`.
-6. Graph / Relations service consumes `dataset.normalized`.
-7. Graph / Relations service builds refund relations and publishes `refund.relations.built`.
+4. Planned ML / Normalization Service will consume `dataset.uploaded`; in the current demo, prepared clean/dirty datasets and mapping docs represent this stage.
+5. Relations Service consumes `dataset.normalized` when that event is available.
+6. Relations Service computes graph-style relation features and publishes `refund.relations.built`.
+7. Dedicated Graph DB storage is not connected yet.
 8. Scoring service consumes `refund.relations.built`.
 9. Scoring service calculates risk scores and publishes `refund.scoring.completed`.
 10. Frontend reads analysis status and results through REST API.
@@ -398,7 +392,7 @@ By the end of the project, we aim to build a working MVP that demonstrates the f
 6. A refund approval risk score is calculated.
 7. The system explains why a refund approval is suspicious.
 8. An analyst views suspicious refund approvals in the dashboard.
-9. The project is deployed on a VM and can be demonstrated.
+9. The project can be demonstrated locally with Docker Compose; VM/public deployment needs latest verification.
 
 ---
 
@@ -434,7 +428,7 @@ Final demo scenario:
   </tr>
   <tr>
     <td align="center"><b>Nikita</b></td>
-    <td align="center">Graph / Relations Service, Graph DB, refund relation graph, customer-agent-return connections</td>
+    <td align="center">Relations Service, graph-style relation features, customer-agent-return connections; dedicated Graph DB is future work</td>
   </tr>
   <tr>
     <td align="center"><b>Ernest</b></td>
@@ -446,7 +440,7 @@ Final demo scenario:
   </tr>
   <tr>
     <td align="center"><b>Amina</b></td>
-    <td align="center">DevOps / Infrastructure, Docker Compose, PostgreSQL, RabbitMQ, Graph DB, VM deployment</td>
+    <td align="center">DevOps / Infrastructure, Docker Compose, PostgreSQL, RabbitMQ, and VM deployment verification</td>
   </tr>
 </table>
 
@@ -479,7 +473,7 @@ The current MVP includes:
 * Kotlin / Spring Boot scoring service with suspicious refund approval detection, dataset-aware scoring endpoints, risk levels, explainable risk reasons, support agent risk summary, and RabbitMQ integration;
 * Nginx gateway routing backend API requests to upload, relations, and scoring services;
 * frontend production proxy support for `/api` requests;
-* RabbitMQ pipeline events for `dataset.uploaded`, `dataset.normalized`, `refund.relations.built`, `refund.scoring.completed`, and `pipeline.failed`;
+* RabbitMQ pipeline exchange `pipeline.exchange` with routing keys `dataset.uploaded`, `dataset.normalized`, `refund.relations.built`, `refund.scoring.completed`, and `pipeline.failed`; the separate normalization stage is still partial/planned;
 * demo refund datasets under `data/` for scoring, dashboard, and investigation flows.
 
 Week 5 refinement focused on compact documentation, clearer scoring explanations, consistent README wording, demo-ready return IDs, and validation evidence.
@@ -488,10 +482,25 @@ Known limitations for the current MVP:
 
 * the full ML / normalization service is still planned as a separate pipeline component;
 * some dashboard flows can still use demo scoring data when uploaded datasets are not yet processed through every backend stage;
-* graph storage is represented by the relations service model and API contracts, while dedicated Graph DB integration remains part of the broader MVP plan;
+* Relations Service currently computes graph-style relation features through service logic and API contracts; dedicated Graph DB storage is not connected yet;
 * scoring currently derives relation-style features from `data/clean_refund_dataset.csv` and marks them as `CSV_DERIVED_FALLBACK` until persisted relation-feature handoff is connected;
 * end-to-end analysis status depends on all RabbitMQ pipeline consumers being available in the deployed environment;
 * PR and deployment links must be added by the team after the branch is pushed and the VM deployment is updated.
+
+Current CI status:
+
+* Upload Service: `go vet`, `go test`, Docker build.
+* Relations Service: `go vet`, `go test`, Docker build.
+* Scoring Service: build check and Docker build; tests are currently skipped in CI with `-x test` and should be re-enabled.
+* Frontend: `npm ci`, production build, Docker build; frontend tests are not yet part of CI.
+* Docker Compose config is checked.
+
+Deployment status:
+
+* Local Docker Compose: implemented.
+* VM deployment: pending updated public link and latest verification.
+* Public URL: TODO.
+* Health checks must be added after deployment is verified.
 
 ---
 

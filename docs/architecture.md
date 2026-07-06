@@ -12,7 +12,13 @@ Fraud & Abuse Detection System is an MVP for e-commerce teams that need to find 
 | Relations Service | Refund relation API and relation-style features for scoring. |
 | Scoring Service | Rule-based risk score, risk level, explanations, scoring events. |
 | PostgreSQL | Dataset/job storage for implemented backend services. |
-| RabbitMQ | Async pipeline events between backend stages. |
+| RabbitMQ | Pipeline exchange: `pipeline.exchange`. |
+
+Planned / partial:
+
+* ML / Normalization Service is not a current root Compose service.
+* Current demo normalization is represented by prepared clean/dirty datasets, mapping docs, and validation artifacts.
+* Dedicated Graph DB storage is not connected yet.
 
 ## Flow
 
@@ -25,7 +31,7 @@ flowchart LR
 
   UP --> PG[(PostgreSQL)]
   UP -->|dataset.uploaded| MQ[(RabbitMQ pipeline.exchange)]
-  MQ -->|dataset.normalized| REL
+  MQ -. planned/partial: dataset.normalized .-> REL
   REL -->|refund.relations.built| MQ
   MQ -->|refund.relations.built| SCORE
   SCORE -->|refund.scoring.completed| MQ
@@ -72,4 +78,4 @@ In the current MVP, Scoring Service exposes these relation-style fields with `fe
 
 * Full normalization and persisted relation-feature storage are still follow-up integration work.
 * Uploaded UUID datasets currently use scoring CSV fallback until normalized storage is connected.
-* Graph DB is represented by the relations model/API; dedicated graph storage remains optional for the MVP demo.
+* Dedicated Graph DB storage is not connected and remains optional/future work for the MVP demo.
