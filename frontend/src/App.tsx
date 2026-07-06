@@ -9,6 +9,7 @@ import {
   CFormInput,
   CFormLabel,
   CFormSelect,
+  CFormTextarea,
   CFormText,
   CHeader,
   CHeaderBrand,
@@ -40,16 +41,22 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  CircleDot,
   Clock3,
+  Database,
+  Download,
   FileSpreadsheet,
   Filter,
   Gauge,
+  Info,
   LayoutDashboard,
   Search,
   ShieldAlert,
   Upload,
   UserRound,
   UsersRound,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import antiFraudLogoFull from "./assets/brand/anti-fraud-logo-full.png";
@@ -114,7 +121,16 @@ type AgentSummary = {
   repeatedCustomerPairs: number;
 };
 
-type ApiStatus = "idle" | "loading" | "ready" | "fallback";
+type ApiStatus = "idle" | "loading" | "ready" | "fallback" | "failed";
+type DataSourceMode = "idle" | "checking" | "live" | "fallback" | "failed";
+type AnalystAction = "REVIEW" | "INVESTIGATE" | "ESCALATE";
+type AnalystOutcome = "UNDECIDED" | "FALSE_POSITIVE" | "CONFIRMED_ABUSE";
+
+type CaseReview = {
+  action: AnalystAction;
+  outcome: AnalystOutcome;
+  note: string;
+};
 
 type UploadResponse = {
   datasetId?: string;
@@ -146,6 +162,127 @@ type AnalysisStatus =
   | "COMPLETED";
 
 const scoringDatasetId = "demo";
+const defaultCaseReview: CaseReview = {
+  action: "REVIEW",
+  outcome: "UNDECIDED",
+  note: "",
+};
+
+const sampleCsvTemplate = `order_id,customer_id,return_id,support_agent_id,order_amount,refund_amount,product_category,return_reason,evidence_provided,decision,manual_override,decision_time_minutes,timestamp
+order_456,customer_789,return_123,agent_001,11999,11500,electronics,item_not_as_described,false,APPROVED,true,2,2026-06-01 09:06:00
+order_785,customer_184,return_204,agent_002,3490,1290,clothing,size_issue,true,APPROVED,false,18,2026-06-01 09:22:00
+`;
+
+const sampleCsvHref = `data:text/csv;charset=utf-8,${encodeURIComponent(sampleCsvTemplate)}`;
+
+const csvSchema = [
+  {
+    semantic: "order_id",
+    required: true,
+    accepted: ["order_id", "purchase_id"],
+    description: "Original purchase identifier",
+  },
+  {
+    semantic: "customer_id",
+    required: true,
+    accepted: ["customer_id", "buyer_id", "client_id"],
+    description: "Buyer or customer identifier",
+  },
+  {
+    semantic: "return_id",
+    required: true,
+    accepted: ["return_id", "refund_request_id"],
+    description: "Refund or return request identifier",
+  },
+  {
+    semantic: "support_agent_id",
+    required: true,
+    accepted: ["support_agent_id", "agent_id", "support_user_id"],
+    description: "Support employee who made the decision",
+  },
+  {
+    semantic: "order_amount",
+    required: true,
+    accepted: ["order_amount", "purchase_amount"],
+    description: "Original order amount",
+  },
+  {
+    semantic: "refund_amount",
+    required: true,
+    accepted: ["refund_amount", "return_amount"],
+    description: "Refunded amount",
+  },
+  {
+    semantic: "decision",
+    required: true,
+    accepted: ["decision", "status", "approval_status"],
+    description: "Approval result",
+  },
+  {
+    semantic: "timestamp",
+    required: true,
+    accepted: ["timestamp", "created_at", "decision_time"],
+    description: "Decision timestamp",
+  },
+  {
+    semantic: "decision_time_minutes",
+    required: false,
+    accepted: ["decision_time_minutes", "resolution_minutes"],
+    description: "Minutes before the support decision",
+  },
+  {
+    semantic: "evidence_provided",
+    required: false,
+    accepted: ["evidence_provided", "has_photo", "proof_provided"],
+    description: "Photo, chat, or delivery evidence flag",
+  },
+  {
+    semantic: "manual_override",
+    required: false,
+    accepted: ["manual_override", "override"],
+    description: "Manual exception used by an agent",
+  },
+];
+
+const riskThresholds = [
+  { level: "LOW" as RiskLevel, range: "0-29", meaning: "Routine approval" },
+  { level: "MEDIUM" as RiskLevel, range: "30-59", meaning: "Needs quick review" },
+  { level: "HIGH" as RiskLevel, range: "60-79", meaning: "Investigate before closing" },
+  { level: "CRITICAL" as RiskLevel, range: "80-100", meaning: "Escalate immediately" },
+];
+
+const scoringRuleDefinitions = [
+  {
+    type: "NO_EVIDENCE",
+    label: "Missing evidence",
+    threshold: "No proof attached to approved refund",
+    source: "CSV evidence flag",
+  },
+  {
+    type: "HIGH_VALUE_REFUND",
+    label: "High-value refund",
+    threshold: "Refund amount is above the high-value threshold",
+    source: "Order and refund amount",
+  },
+  {
+    type: "FAST_APPROVAL",
+    label: "Fast approval",
+    threshold: "Decision time is unusually short",
+    source: "Decision time minutes",
+  },
+  {
+    type: "MANUAL_OVERRIDE",
+    label: "Manual override",
+    threshold: "Approved refund used a manual exception",
+    source: "Manual override flag",
+  },
+  {
+    type: "REPEATED_AGENT_CUSTOMER_PAIR",
+    label: "Repeated pair",
+    threshold: "Same agent-customer pair appears in related approvals",
+    source: "Graph relations",
+  },
+];
 
 const fallbackPreviewRows: PreviewRow[] = [
   {
@@ -361,7 +498,24 @@ const columnLabels: Record<string, string> = {
   evidence_provided: "Evidence",
   manual_override: "Manual override",
   decision_time_minutes: "Decision time",
+  reviewStatus: "Review status",
 };
+
+const actionLabels: Record<AnalystAction, string> = {
+  REVIEW: "Review",
+  INVESTIGATE: "Investigate",
+  ESCALATE: "Escalate",
+};
+
+const outcomeLabels: Record<AnalystOutcome, string> = {
+  UNDECIDED: "No label",
+  FALSE_POSITIVE: "False positive",
+  CONFIRMED_ABUSE: "Confirmed abuse",
+};
+
+function getScoringRule(type: string) {
+  return scoringRuleDefinitions.find((rule) => rule.type === type);
+}
 
 function getInitialPage(): Page {
   const pageParam = new URLSearchParams(window.location.search).get("page");
@@ -621,8 +775,11 @@ function App() {
   const [approvalRows, setApprovalRows] = useState<Approval[]>([]);
   const [selectedApproval, setSelectedApproval] = useState<ReturnRisk | null>(null);
   const [agentSummary, setAgentSummary] = useState<AgentSummary | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<ApiStatus>("idle");
+  const [analysisStatus, setAnalysisStatus] = useState<ApiStatus>("idle");
   const [approvalsStatus, setApprovalsStatus] = useState<ApiStatus>("idle");
   const [detailsStatus, setDetailsStatus] = useState<ApiStatus>("idle");
+  const [caseReviews, setCaseReviews] = useState<Record<string, CaseReview>>({});
   const [riskFilter, setRiskFilter] = useState<"ALL" | RiskLevel>("ALL");
   const [query, setQuery] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -643,6 +800,26 @@ function App() {
     });
   }, [approvalRows, query, riskFilter]);
 
+  const dataSourceMode = useMemo<DataSourceMode>(() => {
+    const statuses = [uploadStatus, analysisStatus, approvalsStatus, detailsStatus];
+    if (isUploading || isAnalyzing || statuses.includes("loading")) return "checking";
+    if (statuses.includes("failed")) return "failed";
+    if (statuses.includes("fallback")) return "fallback";
+    if (statuses.includes("ready")) return "live";
+    return "idle";
+  }, [analysisStatus, approvalsStatus, detailsStatus, isAnalyzing, isUploading, uploadStatus]);
+
+  function updateCaseReview(returnId: string, patch: Partial<CaseReview>) {
+    setCaseReviews((reviews) => ({
+      ...reviews,
+      [returnId]: {
+        ...defaultCaseReview,
+        ...reviews[returnId],
+        ...patch,
+      },
+    }));
+  }
+
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -650,12 +827,15 @@ function App() {
 
     setUploadedFile(file.name);
     setIsUploading(true);
+    setUploadStatus("loading");
+    setAnalysisStatus("idle");
     setUploadProgress(35);
     setCurrentJobId("");
     setCurrentDatasetId("");
     setApprovalRows([]);
     setSelectedApproval(null);
     setAgentSummary(null);
+    setCaseReviews({});
     setApprovalsStatus("idle");
     setDetailsStatus("idle");
     setAnalysisStepIndex(-1);
@@ -684,6 +864,7 @@ function App() {
       setPreviewData(preview);
       setColumnMapping(fallbackMapping);
       setAnalysisStepIndex(0);
+      setUploadStatus("ready");
       uploadSucceeded = true;
     } catch {
       setCurrentDatasetId("");
@@ -691,6 +872,7 @@ function App() {
       setPreviewData(normalizePreview([]));
       setColumnMapping({});
       setAnalysisStepIndex(-1);
+      setUploadStatus("failed");
     } finally {
       setUploadProgress(uploadSucceeded ? 100 : 0);
       setIsUploading(false);
@@ -702,8 +884,11 @@ function App() {
     if (!datasetId) return;
 
     let lastStepIndex = 0;
+    let completedFromStatus = false;
+    let analysisFailed = false;
 
     setIsAnalyzing(true);
+    setAnalysisStatus("loading");
     setAnalysisStepIndex(0);
 
     try {
@@ -727,27 +912,33 @@ function App() {
           lastStepIndex = stepIndex;
           setAnalysisStepIndex(stepIndex);
         }
-        if (step === "COMPLETED" || isCompletedStatus(status)) break;
+        if (step === "COMPLETED" || isCompletedStatus(status)) {
+          completedFromStatus = true;
+          break;
+        }
         await sleep(1000);
       }
     } catch {
-      lastStepIndex = 0;
+      analysisFailed = true;
     }
 
-    if (lastStepIndex < statusSteps.length - 1) {
-      for (let index = Math.max(lastStepIndex + 1, 1); index < statusSteps.length; index += 1) {
-        setAnalysisStepIndex(index);
-        await sleep(index === statusSteps.length - 1 ? 500 : 700);
-      }
+    const scoringResultsLoaded = await loadSuspiciousApprovals(datasetId);
+    if (completedFromStatus || scoringResultsLoaded) {
+      setAnalysisStepIndex(statusSteps.length - 1);
+      setAnalysisStatus(completedFromStatus ? "ready" : "fallback");
+    } else if (analysisFailed) {
+      setAnalysisStepIndex(lastStepIndex);
+      setAnalysisStatus("failed");
+    } else {
+      setAnalysisStepIndex(lastStepIndex);
+      setAnalysisStatus("fallback");
     }
 
-    setAnalysisStepIndex(statusSteps.length - 1);
     setIsAnalyzing(false);
-    await loadSuspiciousApprovals(datasetId);
     setPage("approvals");
   }
 
-  async function loadSuspiciousApprovals(datasetId: string) {
+  async function loadSuspiciousApprovals(datasetId: string): Promise<boolean> {
     setApprovalsStatus("loading");
     const datasetCandidates = [datasetId].filter(
       (value, index, values) => value && values.indexOf(value) === index,
@@ -762,7 +953,7 @@ function App() {
         if (normalized.length > 0) {
           setApprovalRows(normalized);
           setApprovalsStatus("ready");
-          return;
+          return true;
         }
       } catch {
         continue;
@@ -771,6 +962,7 @@ function App() {
 
     setApprovalRows([]);
     setApprovalsStatus("fallback");
+    return false;
   }
 
   async function loadAgentSummary(datasetId: string, agentId: string) {
@@ -856,6 +1048,7 @@ function App() {
       <main className="main">
         <CHeader className="app-header">
           <CHeaderBrand as="h1">Refund approval risk analytics</CHeaderBrand>
+          <DataSourceBanner mode={dataSourceMode} />
         </CHeader>
 
         {page === "dataset" && (
@@ -863,13 +1056,15 @@ function App() {
             uploadedFile={uploadedFile}
             uploadProgress={uploadProgress}
             isUploading={isUploading}
+            uploadStatus={uploadStatus}
             datasetId={currentDatasetId}
             jobId={currentJobId}
             previewData={previewData}
             columnMapping={columnMapping}
             isAnalyzing={isAnalyzing}
+            analysisStatus={analysisStatus}
             analysisStepIndex={analysisStepIndex}
-            canStartAnalysis={Boolean(currentDatasetId)}
+            canStartAnalysis={Boolean(currentDatasetId) && uploadStatus === "ready"}
             onUpload={handleUpload}
             onStart={startAnalysis}
           />
@@ -882,6 +1077,7 @@ function App() {
             onQueryChange={setQuery}
             onRiskFilterChange={setRiskFilter}
             onOpenApproval={openApproval}
+            caseReviews={caseReviews}
             status={approvalsStatus}
           />
         )}
@@ -890,6 +1086,8 @@ function App() {
             agentSummary={agentSummary}
             approval={selectedApproval}
             onOpenApproval={openApproval}
+            review={selectedApproval ? caseReviews[selectedApproval.returnId] ?? defaultCaseReview : defaultCaseReview}
+            onReviewChange={updateCaseReview}
             status={detailsStatus}
           />
         )}
@@ -902,11 +1100,13 @@ function DatasetPage({
   uploadedFile,
   uploadProgress,
   isUploading,
+  uploadStatus,
   datasetId,
   jobId,
   previewData,
   columnMapping,
   isAnalyzing,
+  analysisStatus,
   analysisStepIndex,
   canStartAnalysis,
   onUpload,
@@ -915,11 +1115,13 @@ function DatasetPage({
   uploadedFile: string;
   uploadProgress: number;
   isUploading: boolean;
+  uploadStatus: ApiStatus;
   datasetId: string;
   jobId: string;
   previewData: DatasetPreview;
   columnMapping: ColumnMapping;
   isAnalyzing: boolean;
+  analysisStatus: ApiStatus;
   analysisStepIndex: number;
   canStartAnalysis: boolean;
   onUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -937,12 +1139,23 @@ function DatasetPage({
               <SectionTitle icon={Upload} title="Upload dataset" text="Upload a CSV file and review the detected structure." />
             </CCardHeader>
             <CCardBody>
+              {uploadStatus === "failed" && (
+                <ApiNotice tone="warning" text="Upload API failed. Check the CSV schema and try another file." />
+              )}
               <CFormLabel className="dropzone">
                 <FileSpreadsheet size={34} />
                 <strong>{uploadedFile || "No file selected"}</strong>
                 <span>Choose CSV file</span>
                 <CFormInput accept=".csv" className="visually-hidden" onChange={onUpload} type="file" />
               </CFormLabel>
+
+              <div className="sample-actions">
+                <CButton color="primary" href={sampleCsvHref} download="anti_fraud_sample_refunds.csv" variant="outline">
+                  <Download size={17} />
+                  Download sample CSV
+                </CButton>
+                <span>Accepted aliases are listed in the schema checklist.</span>
+              </div>
 
               <div className="d-flex justify-content-between mt-4 mb-2">
                 <span>Upload progress</span>
@@ -1011,6 +1224,12 @@ function DatasetPage({
               <SectionTitle icon={Clock3} title="Analysis progress" text="The pipeline is complete when scored approvals are ready." />
             </CCardHeader>
             <CCardBody>
+              {analysisStatus === "failed" && (
+                <ApiNotice tone="warning" text="Analysis API failed. Scoring results will only appear if the dataset was already processed." />
+              )}
+              {analysisStatus === "fallback" && (
+                <ApiNotice tone="warning" text="Backend pipeline status did not reach completed, but scoring results were checked." />
+              )}
               <AnalysisStatusList analysisStepIndex={analysisStepIndex} isAnalyzing={isAnalyzing} />
             </CCardBody>
           </CCard>
@@ -1037,7 +1256,27 @@ function DatasetPage({
           </CCard>
         </CCol>
         <CCol xl={4}>
-          <CCard className="h-100">
+          <CCard className="mb-4">
+            <CCardHeader>
+              <SectionTitle icon={Info} title="Accepted CSV schema" text="Required fields must map to the normalized refund model." />
+            </CCardHeader>
+            <CListGroup flush>
+              {csvSchema.map((field) => (
+                <CListGroupItem className="schema-item" key={field.semantic}>
+                  <div>
+                    <strong>{field.semantic}</strong>
+                    <div className="text-body-secondary small">{field.description}</div>
+                    <div className="schema-aliases">{field.accepted.join(", ")}</div>
+                  </div>
+                  <CBadge color={field.required ? "danger" : "secondary"}>
+                    {field.required ? "Required" : "Optional"}
+                  </CBadge>
+                </CListGroupItem>
+              ))}
+            </CListGroup>
+          </CCard>
+
+          <CCard>
             <CCardHeader>
               <SectionTitle icon={Filter} title="Column mapping" text="Detected normalization contract for uploaded rows." />
             </CCardHeader>
@@ -1070,6 +1309,7 @@ export function ApprovalsPage({
   onQueryChange,
   onRiskFilterChange,
   onOpenApproval,
+  caseReviews = {},
   status,
 }: {
   approvals: Approval[];
@@ -1078,6 +1318,7 @@ export function ApprovalsPage({
   onQueryChange: (value: string) => void;
   onRiskFilterChange: (value: "ALL" | RiskLevel) => void;
   onOpenApproval: (approval: Approval) => void;
+  caseReviews?: Record<string, CaseReview>;
   status: ApiStatus;
 }) {
   const [currentPage, setCurrentPage] = useState(0);
@@ -1165,6 +1406,7 @@ export function ApprovalsPage({
                   "decision",
                   "riskScore",
                   "riskLevel",
+                  "reviewStatus",
                   "topReason",
                   "",
                 ]}
@@ -1174,6 +1416,10 @@ export function ApprovalsPage({
                   if (column === "decision") return formatEnum(row.decision);
                   if (column === "riskLevel") return <RiskBadge level={row.riskLevel} />;
                   if (column === "riskScore") return <ScoreBar score={row.riskScore} />;
+                  if (column === "reviewStatus") {
+                    const review = caseReviews[row.returnId] ?? defaultCaseReview;
+                    return <ReviewStatus review={review} />;
+                  }
                   if (column === "") {
                     return (
                       <CButton color="primary" size="sm" variant="outline" onClick={() => onOpenApproval(row)}>
@@ -1228,11 +1474,15 @@ export function DetailsPage({
   agentSummary,
   approval,
   onOpenApproval,
+  review = defaultCaseReview,
+  onReviewChange = () => undefined,
   status,
 }: {
   agentSummary: AgentSummary | null;
   approval: ReturnRisk | null;
   onOpenApproval: (approval: Approval) => void;
+  review?: CaseReview;
+  onReviewChange?: (returnId: string, patch: Partial<CaseReview>) => void;
   status: ApiStatus;
 }) {
   if (!approval) {
@@ -1258,13 +1508,11 @@ export function DetailsPage({
             <h2>{approval.returnId}</h2>
             <p className="text-body-secondary mb-0">{approval.topReason}</p>
           </div>
-          <CCard className="risk-card">
-            <CCardBody>
-              <div className="text-body-secondary">Risk score</div>
-              <strong>{approval.riskScore}</strong>
-              <RiskBadge level={approval.riskLevel} />
-            </CCardBody>
-          </CCard>
+          <div className="risk-summary">
+            <div className="text-body-secondary">Risk score</div>
+            <strong>{approval.riskScore}</strong>
+            <RiskBadge level={approval.riskLevel} />
+          </div>
         </CCardBody>
       </CCard>
 
@@ -1305,20 +1553,29 @@ export function DetailsPage({
               <strong>Why was this refund flagged?</strong>
             </CCardHeader>
             <CListGroup flush>
-              {approval.reasons.map((item) => (
-                <CListGroupItem className="explanation-item" key={item.type}>
-                  <div>
-                    <strong>{formatEnum(item.type)}</strong>
-                    <div className="text-body-secondary">{item.message}</div>
-                  </div>
-                  <CBadge color="danger">+{item.scoreImpact}</CBadge>
-                </CListGroupItem>
-              ))}
+              {approval.reasons.map((item) => {
+                const rule = getScoringRule(item.type);
+                return (
+                  <CListGroupItem className="explanation-item" key={item.type}>
+                    <div>
+                      <strong>{rule?.label ?? formatEnum(item.type)}</strong>
+                      <div className="text-body-secondary">{item.message}</div>
+                      {rule && (
+                        <div className="rule-meta">
+                          <span>{rule.threshold}</span>
+                          <span>{rule.source}</span>
+                        </div>
+                      )}
+                    </div>
+                    <CBadge color="danger">+{item.scoreImpact}</CBadge>
+                  </CListGroupItem>
+                );
+              })}
             </CListGroup>
           </CCard>
         </CCol>
         <CCol lg={5}>
-          <CCard className="h-100">
+          <CCard className="mb-4">
             <CCardHeader>
               <strong>Investigation context</strong>
             </CCardHeader>
@@ -1355,8 +1612,72 @@ export function DetailsPage({
               </CListGroup>
             </CCardBody>
           </CCard>
+
+          <CCard>
+            <CCardHeader>
+              <strong>Scoring thresholds</strong>
+            </CCardHeader>
+            <CListGroup flush>
+              {riskThresholds.map((threshold) => (
+                <CListGroupItem className="threshold-item" key={threshold.level}>
+                  <RiskBadge level={threshold.level} />
+                  <strong>{threshold.range}</strong>
+                  <span className="text-body-secondary">{threshold.meaning}</span>
+                </CListGroupItem>
+              ))}
+            </CListGroup>
+          </CCard>
         </CCol>
       </CRow>
+
+      <CCard className="mb-4">
+        <CCardHeader>
+          <strong>Analyst decision</strong>
+        </CCardHeader>
+        <CCardBody className="review-panel">
+          <div className="review-controls">
+            <div>
+              <div className="eyebrow">Next action</div>
+              <div className="button-strip">
+                {(["REVIEW", "INVESTIGATE", "ESCALATE"] as AnalystAction[]).map((action) => (
+                  <CButton
+                    color={review.action === action ? "primary" : "secondary"}
+                    key={action}
+                    size="sm"
+                    variant={review.action === action ? undefined : "outline"}
+                    onClick={() => onReviewChange(approval.returnId, { action })}
+                  >
+                    {actionLabels[action]}
+                  </CButton>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="eyebrow">Decision label</div>
+              <div className="button-strip">
+                {(["UNDECIDED", "FALSE_POSITIVE", "CONFIRMED_ABUSE"] as AnalystOutcome[]).map((outcome) => (
+                  <CButton
+                    color={review.outcome === outcome ? "primary" : "secondary"}
+                    key={outcome}
+                    size="sm"
+                    variant={review.outcome === outcome ? undefined : "outline"}
+                    onClick={() => onReviewChange(approval.returnId, { outcome })}
+                  >
+                    {outcomeLabels[outcome]}
+                  </CButton>
+                ))}
+              </div>
+            </div>
+          </div>
+          <CFormTextarea
+            aria-label="Reviewer notes"
+            onChange={(event) => onReviewChange(approval.returnId, { note: event.target.value })}
+            placeholder="Reviewer notes"
+            rows={3}
+            value={review.note}
+          />
+        </CCardBody>
+      </CCard>
 
       <CCard>
         <CCardHeader>
@@ -1391,6 +1712,70 @@ function ApiNotice({ tone, text }: { tone: "loading" | "warning"; text: string }
     <div className={`api-notice ${tone}`} role={tone === "loading" ? "status" : "alert"} aria-live="polite">
       {tone === "loading" ? <span className="button-spinner dark" aria-hidden="true" /> : <AlertTriangle size={17} />}
       <span>{text}</span>
+    </div>
+  );
+}
+
+function DataSourceBanner({ mode }: { mode: DataSourceMode }) {
+  const config: Record<
+    DataSourceMode,
+    {
+      icon: typeof Upload;
+      label: string;
+      detail: string;
+    }
+  > = {
+    idle: {
+      icon: Database,
+      label: "No dataset",
+      detail: "Upload a CSV to connect live services.",
+    },
+    checking: {
+      icon: CircleDot,
+      label: "Checking APIs",
+      detail: "Upload, analysis, or scoring request is running.",
+    },
+    live: {
+      icon: Wifi,
+      label: "Live backend",
+      detail: "Results are loaded from gateway API.",
+    },
+    fallback: {
+      icon: AlertTriangle,
+      label: "Fallback visible",
+      detail: "Some backend response is unavailable or incomplete.",
+    },
+    failed: {
+      icon: WifiOff,
+      label: "API failed",
+      detail: "Backend request failed; retry or verify deployment.",
+    },
+  };
+  const current = config[mode];
+  const Icon = current.icon;
+
+  return (
+    <div className={`data-source-banner ${mode}`} role="status" aria-live="polite">
+      <Icon size={17} />
+      <div>
+        <strong>{current.label}</strong>
+        <span>{current.detail}</span>
+      </div>
+    </div>
+  );
+}
+
+function ReviewStatus({ review }: { review: CaseReview }) {
+  const colorByAction: Record<AnalystAction, "secondary" | "warning" | "danger"> = {
+    REVIEW: "secondary",
+    INVESTIGATE: "warning",
+    ESCALATE: "danger",
+  };
+
+  return (
+    <div className="review-status">
+      <CBadge color={colorByAction[review.action]}>{actionLabels[review.action]}</CBadge>
+      {review.outcome !== "UNDECIDED" && <span>{outcomeLabels[review.outcome]}</span>}
     </div>
   );
 }
