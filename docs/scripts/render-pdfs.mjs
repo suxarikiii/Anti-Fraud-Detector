@@ -8,16 +8,16 @@ const tempDir = resolve(root, "docs/assets/pdf/html");
 
 const docs = [
   {
-    source: "docs/design-wireframes.md",
-    html: "design-wireframes.html",
-    pdf: "design-wireframes.pdf",
-    title: "Design Wireframes and User Flows",
+    source: "docs/demo-flow.md",
+    html: "demo-flow.html",
+    pdf: "demo-flow.pdf",
+    title: "Demo Flow",
   },
   {
-    source: "docs/mvp-features-and-user-journeys.md",
-    html: "mvp-features-and-user-journeys.html",
-    pdf: "mvp-features-and-user-journeys.pdf",
-    title: "Implemented MVP Features and User Journeys",
+    source: "docs/architecture.md",
+    html: "architecture.html",
+    pdf: "architecture.pdf",
+    title: "Architecture",
   },
 ];
 

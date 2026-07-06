@@ -237,53 +237,29 @@ flowchart LR
   </tr>
 
   <tr>
-    <td align="center" rowspan="12"><b>Documentation</b></td>
-    <td align="center"><a href="./docs/project-plan.md"><b>Project Plan</b></a></td>
-    <td align="center">7-week project plan, milestones, and expected results</td>
-  </tr>
-  <tr>
+    <td align="center" rowspan="6"><b>Documentation</b></td>
     <td align="center"><a href="./docs/architecture.md"><b>Architecture</b></a></td>
-    <td align="center">System architecture, components, RabbitMQ pipeline, and data flow</td>
+    <td align="center">Current services, async pipeline, events, relation model, and limitations</td>
   </tr>
   <tr>
-    <td align="center"><a href="./docs/demo-flow.md"><b>Demo Flow</b></a></td>
-    <td align="center">Demo scenario for showing the full refund approval analysis workflow</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="./docs/design-wireframes.md"><b>Design Wireframes</b></a></td>
-    <td align="center">Designer-facing wireframes, mockup screenshots, and user flow diagrams</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="./docs/mvp-features-and-user-journeys.md"><b>MVP Features and User Journeys</b></a></td>
-    <td align="center">Implemented MVP features, functional user journey, screenshots, and demo narrative</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="./docs/team-roles.md"><b>Team Roles</b></a></td>
-    <td align="center">Team responsibilities and weekly report schedule</td>
+    <td align="center"><a href="./docs/api-contracts.md"><b>API Contracts</b></a></td>
+    <td align="center">MVP endpoint contracts for upload, relations, and scoring services</td>
   </tr>
   <tr>
     <td align="center"><a href="./docs/data-format.md"><b>Data Format</b></a></td>
     <td align="center">CSV columns and synthetic refund scenario examples</td>
   </tr>
   <tr>
+    <td align="center"><a href="./docs/demo-flow.md"><b>Demo Flow</b></a></td>
+    <td align="center">Demo scenario, screenshots, smoke commands, and stable return IDs</td>
+  </tr>
+  <tr>
+    <td align="center"><a href="./docs/devops.md"><b>DevOps</b></a></td>
+    <td align="center">Docker Compose, local checks, and deployment notes</td>
+  </tr>
+  <tr>
     <td align="center"><a href="./docs/scoring-rules.md"><b>Scoring Rules</b></a></td>
-    <td align="center">Rule-based refund approval risk score logic and risk levels</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="./docs/rabbitmq-events.md"><b>RabbitMQ Events</b></a></td>
-    <td align="center">Asynchronous processing events and payload examples</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="./docs/graph-model.md"><b>Graph Model</b></a></td>
-    <td align="center">Refund relation graph vertices, edges, and use cases</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="./docs/api-contracts.md"><b>API Contracts</b></a></td>
-    <td align="center">MVP endpoint contracts for upload, ML, relations, and scoring services</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="./docs/reports/"><b>Weekly Reports</b></a></td>
-    <td align="center">Weekly progress reports from Week 2 to Week 7</td>
+    <td align="center">Rule-based risk score, risk levels, demo IDs, and current feature source</td>
   </tr>
 </table>
 
@@ -355,23 +331,24 @@ Example scoring response:
   "orderId": "order_456",
   "customerId": "customer_789",
   "supportAgentId": "agent_001",
-  "riskScore": 84,
+  "datasetId": "demo",
+  "riskScore": 75,
   "riskLevel": "HIGH",
-  "topReason": "Refund approved without evidence for a high-value order",
+  "topReason": "Refund was approved without attached evidence, so the analyst cannot verify the customer's claim from this record.",
   "reasons": [
     {
       "type": "NO_EVIDENCE",
-      "message": "Refund was approved without required evidence",
+      "message": "Refund was approved without attached evidence, so the analyst cannot verify the customer's claim from this record.",
       "scoreImpact": 25
     },
     {
       "type": "HIGH_VALUE_REFUND",
-      "message": "Refund amount is unusually high",
+      "message": "Refund amount is $700.00. This is above the $500.00 high-value threshold and should be checked before payout.",
       "scoreImpact": 20
     },
     {
       "type": "AGENT_HIGH_APPROVAL_RATE",
-      "message": "Support agent has unusually high approval rate",
+      "message": "This support agent approved 90% of 10 refund decisions in the dataset; compare this with team norms before accepting the case.",
       "scoreImpact": 30
     }
   ]
@@ -492,9 +469,9 @@ Optional bonus functionality may include:
 
 <h2 align="center">Project Status</h2>
 
-The project is currently in Week 2 implementation.
+The project is currently in the Week 5 feedback-driven refinement stage.
 
-The current working version includes:
+The current MVP includes:
 
 * React / TypeScript frontend dashboard with dataset upload, preview, analysis progress, suspicious approvals table, and refund approval details view;
 * Go upload service with CSV upload, dataset records, analysis job creation, preview API, MinIO file storage, PostgreSQL persistence, and RabbitMQ event publishing;
@@ -505,12 +482,16 @@ The current working version includes:
 * RabbitMQ pipeline events for `dataset.uploaded`, `dataset.normalized`, `refund.relations.built`, `refund.scoring.completed`, and `pipeline.failed`;
 * demo refund datasets under `data/` for scoring, dashboard, and investigation flows.
 
-Known limitations for the current Week 2 version:
+Week 5 refinement focused on compact documentation, clearer scoring explanations, consistent README wording, demo-ready return IDs, and validation evidence.
+
+Known limitations for the current MVP:
 
 * the full ML / normalization service is still planned as a separate pipeline component;
 * some dashboard flows can still use demo scoring data when uploaded datasets are not yet processed through every backend stage;
 * graph storage is represented by the relations service model and API contracts, while dedicated Graph DB integration remains part of the broader MVP plan;
-* end-to-end analysis status depends on all RabbitMQ pipeline consumers being available in the deployed environment.
+* scoring currently derives relation-style features from `data/clean_refund_dataset.csv` and marks them as `CSV_DERIVED_FALLBACK` until persisted relation-feature handoff is connected;
+* end-to-end analysis status depends on all RabbitMQ pipeline consumers being available in the deployed environment;
+* PR and deployment links must be added by the team after the branch is pushed and the VM deployment is updated.
 
 ---
 

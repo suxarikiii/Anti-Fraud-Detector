@@ -161,15 +161,15 @@ SUSPICIOUS_CLUSTER
 
 | Rule | Condition | Score Impact |
 | --- | --- | --- |
-| NO_EVIDENCE | Refund approved without evidence | +25 |
-| HIGH_VALUE_REFUND | Refund amount is above threshold | +20 |
-| FULL_AMOUNT_REFUND | Refund amount is close to order amount | +15 |
-| FAST_APPROVAL | Approval happened too quickly | +15 |
+| NO_EVIDENCE | Refund was approved and no evidence was provided | +25 |
+| HIGH_VALUE_REFUND | Refund amount is at least `500.00` | +20 |
+| FULL_AMOUNT_REFUND | Refund amount is at least `95%` of order amount | +15 |
+| FAST_APPROVAL | Refund was approved in `5` minutes or less | +15 |
 | MANUAL_OVERRIDE | Manual override was used | +20 |
-| AGENT_HIGH_APPROVAL_RATE | Agent approval rate is unusually high | +30 |
-| CUSTOMER_FREQUENT_RETURNS | Customer has many refund requests | +20 |
-| REPEATED_AGENT_CUSTOMER_PAIR | Same agent repeatedly approves same customer | +25 |
-| SUSPICIOUS_CLUSTER | Approval belongs to suspicious graph cluster | +25 |
+| AGENT_HIGH_APPROVAL_RATE | Agent has at least `5` decisions and approval rate is above `85%` | +30 |
+| CUSTOMER_FREQUENT_RETURNS | Customer has at least `5` return requests in the dataset | +20 |
+| REPEATED_AGENT_CUSTOMER_PAIR | Same agent handled at least `3` return requests for the same customer | +25 |
+| SUSPICIOUS_CLUSTER | CSV-derived or relation-derived cluster size is at least `5` | +25 |
 
 Rules are evaluated in the table order so `topReason` and the `reasons` array are
 deterministic for the same input. Scores above `100` are capped at `100`.
@@ -202,30 +202,35 @@ refund.scoring.completed
 ```json
 {
   "datasetId": "demo",
-  "returnId": "return_123",
-  "orderId": "order_456",
-  "customerId": "customer_789",
-  "supportAgentId": "agent_001",
-  "refundAmount": 249.99,
-  "orderAmount": 299.99,
+  "returnId": "return_3041",
+  "orderId": "order_1041",
+  "customerId": "customer_999",
+  "supportAgentId": "agent_999",
+  "refundAmount": 1019.25,
+  "orderAmount": 1168.27,
   "decision": "APPROVED",
-  "riskScore": 84,
-  "riskLevel": "HIGH",
-  "topReason": "Refund approved without evidence for a high-value order",
+  "riskScore": 100,
+  "riskLevel": "CRITICAL",
+  "topReason": "Refund was approved without attached evidence, so the analyst cannot verify the customer's claim from this record.",
   "reasons": [
     {
       "type": "NO_EVIDENCE",
-      "message": "Refund was approved without required evidence",
+      "message": "Refund was approved without attached evidence, so the analyst cannot verify the customer's claim from this record.",
       "scoreImpact": 25
     },
     {
       "type": "HIGH_VALUE_REFUND",
-      "message": "Refund amount is above threshold",
+      "message": "Refund amount is $1019.25. This is above the $500.00 high-value threshold and should be checked before payout.",
       "scoreImpact": 20
     },
     {
+      "type": "FAST_APPROVAL",
+      "message": "Decision was approved in 4 minutes. This is at or below the 5-minute review threshold and may indicate a skipped check.",
+      "scoreImpact": 15
+    },
+    {
       "type": "AGENT_HIGH_APPROVAL_RATE",
-      "message": "Support agent approval rate is unusually high",
+      "message": "This support agent approved 100% of 5 refund decisions in the dataset; compare this with team norms before accepting the case.",
       "scoreImpact": 30
     }
   ],
