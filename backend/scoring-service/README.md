@@ -17,7 +17,7 @@ It is responsible for:
 
 ```mermaid
 flowchart TD
-    A[Graph / Relations Service] -->|publish refund.relations.built| B[RabbitMQ Topic Exchange]
+    A[Relations Service] -->|publish refund.relations.built| B[RabbitMQ pipeline.exchange]
     B -->|consume refund.relations.built| C[Scoring Service]
 
     C --> D[Read CSV-derived fallback features]
@@ -114,7 +114,7 @@ curl http://localhost:8080/api/scoring/datasets/demo/returns/return_3041/details
 curl http://localhost:8080/api/scoring/datasets/demo/agents/agent_999/risk-summary
 ```
 
-The scoring service consumes `refund.relations.built` from `pipeline.exchange` and publishes `refund.scoring.completed` or `pipeline.failed`.
+The scoring service consumes `refund.relations.built` from RabbitMQ pipeline exchange `pipeline.exchange` and publishes `refund.scoring.completed` or `pipeline.failed`.
 
 Relation feature integration is event-ready for the MVP. Until relation features
 are persisted in scoring, the service derives these feature names from the CSV:
@@ -242,9 +242,9 @@ refund.scoring.completed
 
 | returnId | Expected Level | Main Reasons | Explanation |
 | --- | --- | --- | --- |
-| `return_300347` | LOW | none expected | Normal approval with evidence and no repeated relation pattern. |
+| `return_3001` | LOW | `FULL_AMOUNT_REFUND` | Low-risk demo case. |
 | `return_303075` | MEDIUM | `NO_EVIDENCE`, `HIGH_VALUE_REFUND` | High-value refund approved without evidence. |
-| `return_3011` | CRITICAL | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FULL_AMOUNT_REFUND` | Full refund of a high-value order without evidence. |
+| `return_3006` | HIGH | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `AGENT_HIGH_APPROVAL_RATE` | High-risk case with no evidence, high refund amount, and high agent approval rate. |
 | `return_3041` | CRITICAL | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FAST_APPROVAL`, `MANUAL_OVERRIDE`, relation pattern rules | Repeated customer-agent pattern with manual overrides and high-value fast approvals. |
 
 <h2 align="center">Known Limitations</h2>
