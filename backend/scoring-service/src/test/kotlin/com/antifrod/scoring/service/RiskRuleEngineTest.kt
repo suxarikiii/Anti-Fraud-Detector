@@ -61,6 +61,34 @@ class RiskRuleEngineTest {
     }
 
     @Test
+    fun `should build analyst readable explanations with business context`() {
+        val reasons = riskRuleEngine.calculateReasons(
+            features(
+                evidenceProvided = false,
+                refundAmount = 1_019.25,
+                orderAmount = 1_168.27,
+                refundAmountRatio = 1_019.25 / 1_168.27,
+                decisionTimeMinutes = 4,
+                manualOverride = true,
+                customerReturnCount = 5,
+                agentDecisionCount = 5,
+                agentApprovalRate = 1.0,
+                customerAgentPairCount = 5,
+                clusterSize = 5
+            )
+        )
+
+        assertMessageContains(reasons, "NO_EVIDENCE", "analyst cannot verify")
+        assertMessageContains(reasons, "HIGH_VALUE_REFUND", "$500.00 high-value threshold")
+        assertMessageContains(reasons, "FAST_APPROVAL", "5-minute review threshold")
+        assertMessageContains(reasons, "MANUAL_OVERRIDE", "standard decision path")
+        assertMessageContains(reasons, "AGENT_HIGH_APPROVAL_RATE", "compare this with team norms")
+        assertMessageContains(reasons, "CUSTOMER_FREQUENT_RETURNS", "repeat refund behavior")
+        assertMessageContains(reasons, "REPEATED_AGENT_CUSTOMER_PAIR", "repeated approvals should be reviewed")
+        assertMessageContains(reasons, "SUSPICIOUS_CLUSTER", "investigate linked requests")
+    }
+
+    @Test
     fun `should resolve required risk level boundaries`() {
         mapOf(
             0 to RiskLevel.LOW,
@@ -91,6 +119,14 @@ class RiskRuleEngineTest {
         assertTrue(
             riskRuleEngine.calculateReasons(features).any { it.type == type },
             "Expected reason $type"
+        )
+    }
+
+    private fun assertMessageContains(reasons: List<RiskReason>, type: String, expectedText: String) {
+        val reason = reasons.first { it.type == type }
+        assertTrue(
+            reason.message.contains(expectedText),
+            "Expected $type message to contain '$expectedText' but was '${reason.message}'"
         )
     }
 
