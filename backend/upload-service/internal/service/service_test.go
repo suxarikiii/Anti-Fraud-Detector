@@ -27,6 +27,18 @@ purchase_1001,buyer_200,refund_req_3001,agent_001,203.84,199.57,clothing,changed
 purchase_1002,buyer_201,refund_req_3002,agent_005,143.16,131.27,sports,item_not_as_described,yes,approved,no,35,2026-06-01 09:22:00
 `
 
+const dirtyRefundCSVWithBlankOptionalDecisionTime = `purchase_id,buyer_id,refund_request_id,agent_id,purchase_amount,return_amount,category,reason,has_photo,status,override,resolution_minutes,created_at
+purchase_1001,buyer_200,refund_req_3001,agent_001,203.84,199.57,clothing,changed_mind,yes,approved,no,,2026-06-01 09:06:00
+`
+
+const retailHubCSV = `order_amount,agent_id,customer_id,override,decision_time_minutes,order_id,created_at,category,evidence,return_id,return_amount,decision,reason
+"1.574,41",agent_018,buyer_0564,0,65,purchase_100242,19.05.2026 07:25,luxury,1,refund_req_300242,"1.137,56",approve,item_not_as_described
+`
+
+const shopflowCSV = `decision_time,purchase_amount,manual_override,client_id,refund_amount,proof_provided,refund_request_id,support_user_id,approval_status,decision_time_minutes,purchase_id,product_category,return_reason
+05/08/2026 15:31,"$1,316.22",Y,buyer_0231,"$1,247.28",N,refund_req_304077,agent_028,Approved,8,purchase_104077,ELECTRONICS,damaged_item
+`
+
 func TestParseCSVPreviewCleanAndDirtyRefundFiles(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -86,6 +98,33 @@ func TestValidateUploadedCSVInvalidCases(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %q, want to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateUploadedCSVAllowsBlankOptionalDecisionTime(t *testing.T) {
+	err := validateUploadedCSV("dirty_business_refund_dataset.csv", []byte(dirtyRefundCSVWithBlankOptionalDecisionTime))
+	if err != nil {
+		t.Fatalf("validate uploaded CSV: %v", err)
+	}
+}
+
+func TestValidateUploadedCSVSupportsDirtyDemoFormats(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		body     string
+	}{
+		{name: "retailhub", filename: "dirty_retailhub_refund_dataset.csv", body: retailHubCSV},
+		{name: "shopflow", filename: "dirty_shopflow_refund_dataset.csv", body: shopflowCSV},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateUploadedCSV(tt.filename, []byte(tt.body))
+			if err != nil {
+				t.Fatalf("validate uploaded CSV: %v", err)
 			}
 		})
 	}
