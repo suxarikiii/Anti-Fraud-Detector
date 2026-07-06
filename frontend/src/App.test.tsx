@@ -60,6 +60,19 @@ describe("Week 4 scoring dashboard", () => {
     expect(screen.getByText("Critical")).toBeInTheDocument();
   });
 
+  it("shows dataset source and CSV schema onboarding before upload", () => {
+    render(<App />);
+
+    expect(screen.getByText("No dataset")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /download sample csv/i })).toHaveAttribute(
+      "download",
+      "anti_fraud_sample_refunds.csv",
+    );
+    expect(screen.getByText("Accepted CSV schema")).toBeInTheDocument();
+    expect(screen.getByText("order_id")).toBeInTheDocument();
+    expect(screen.getAllByText("Required").length).toBeGreaterThan(0);
+  });
+
   it("renders approvals table with risk score and review action", () => {
     render(
       <ApprovalsPage
@@ -128,9 +141,39 @@ describe("Week 4 scoring dashboard", () => {
     );
 
     expect(screen.getByText("Why was this refund flagged?")).toBeInTheDocument();
-    expect(screen.getByText("No Evidence")).toBeInTheDocument();
+    expect(screen.getByText("Missing evidence")).toBeInTheDocument();
     expect(screen.getByText("Return was approved without supporting evidence.")).toBeInTheDocument();
     expect(screen.getAllByText("agent_api_1").length).toBeGreaterThan(0);
+    expect(screen.getByText("Scoring thresholds")).toBeInTheDocument();
+    expect(screen.getByText("80-100")).toBeInTheDocument();
+  });
+
+  it("lets analyst choose follow-up action and notes on details page", async () => {
+    const onReviewChange = vi.fn();
+
+    render(
+      <DetailsPage
+        agentSummary={null}
+        approval={details}
+        onOpenApproval={vi.fn()}
+        onReviewChange={onReviewChange}
+        review={{
+          action: "REVIEW",
+          outcome: "UNDECIDED",
+          note: "",
+        }}
+        status="ready"
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Escalate" }));
+    expect(onReviewChange).toHaveBeenCalledWith("return_api_1", { action: "ESCALATE" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirmed abuse" }));
+    expect(onReviewChange).toHaveBeenCalledWith("return_api_1", { outcome: "CONFIRMED_ABUSE" });
+
+    await userEvent.type(screen.getByLabelText("Reviewer notes"), "N");
+    expect(onReviewChange).toHaveBeenCalledWith("return_api_1", { note: "N" });
   });
 
   it("renders analysis status progress", () => {
@@ -214,6 +257,7 @@ describe("Week 4 scoring dashboard", () => {
     render(<App />);
     await uploadAndRunAnalysis();
 
+    expect(await screen.findByText("Live backend")).toBeInTheDocument();
     expect(await screen.findByText("return_api_1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review" }));
 
@@ -281,7 +325,7 @@ describe("Week 4 scoring dashboard", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Review" }));
 
     expect(await screen.findByText("Snake case payload was normalized")).toBeInTheDocument();
-    expect(screen.getByText("Fast Approval")).toBeInTheDocument();
+    expect(screen.getByText("Fast approval")).toBeInTheDocument();
     expect(screen.getByText("Approval was unusually fast for this refund amount.")).toBeInTheDocument();
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("No")).toBeInTheDocument();
