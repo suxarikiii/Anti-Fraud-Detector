@@ -58,6 +58,12 @@ paths:
                     type: string
                   status:
                     type: string
+        '400':
+          description: invalid upload or CSV validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/datasets/{datasetId}/preview:
     get:
@@ -81,7 +87,13 @@ paths:
                       - customer_id
                       - return_id
                     rows:
+                      - order_id: order_1001
+                        customer_id: customer_200
+                        return_id: return_3001
+                    rawRows:
                       - ["order_1001", "customer_200", "return_3001"]
+                    rowCount: 1
+                    truncated: false
                 dirtyBusinessPreview:
                   value:
                     headers:
@@ -89,9 +101,21 @@ paths:
                       - buyer_id
                       - refund_request_id
                     rows:
+                      - purchase_id: purchase_1001
+                        buyer_id: buyer_200
+                        refund_request_id: refund_req_3001
+                    rawRows:
                       - ["purchase_1001", "buyer_200", "refund_req_3001"]
+                    rowCount: 1
+                    truncated: false
               schema:
                 $ref: '#/components/schemas/PreviewResponse'
+        '404':
+          description: dataset was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/analysis/{datasetId}/start:
     post:
@@ -111,11 +135,27 @@ paths:
                 startAnalysis:
                   value:
                     jobId: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
+                    status: NORMALIZING
               schema:
                 type: object
                 properties:
                   jobId:
                     type: string
+                  status:
+                    type: string
+                    enum: [UPLOADED, NORMALIZING, NORMALIZED, BUILDING_RELATIONS, SCORING, COMPLETED, FAILED]
+        '404':
+          description: dataset was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: analysis could not be started because pipeline event publishing failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/analysis/{jobId}/status:
     get:
@@ -152,6 +192,12 @@ paths:
                     updatedAt: "2026-06-01T10:01:00Z"
               schema:
                 $ref: '#/components/schemas/AnalysisStatus'
+        '404':
+          description: analysis job was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
     patch:
       summary: Update analysis job status for local demo/admin use
@@ -190,6 +236,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalysisStatus'
+        '400':
+          description: unsupported status or invalid body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: analysis job was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 components:
   schemas:
@@ -203,9 +261,20 @@ components:
         rows:
           type: array
           items:
+            type: object
+            additionalProperties:
+              type: string
+        rawRows:
+          type: array
+          description: Positional row values retained for compatibility and debugging.
+          items:
             type: array
             items:
               type: string
+        rowCount:
+          type: integer
+        truncated:
+          type: boolean
     AnalysisStatus:
       type: object
       properties:
@@ -249,3 +318,20 @@ components:
         state:
           type: string
           enum: [pending, current, completed, failed]
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+        error:
+          type: string
+        code:
+          type: string
+          example: INVALID_CSV
+        message:
+          type: string
+        path:
+          type: string
+        timestamp:
+          type: string
+          format: date-time

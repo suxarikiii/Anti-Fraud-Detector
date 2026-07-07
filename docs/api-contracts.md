@@ -19,6 +19,56 @@ UPLOADED -> NORMALIZING -> NORMALIZED -> BUILDING_RELATIONS -> SCORING -> COMPLE
 FAILED
 ```
 
+Preview response:
+
+```json
+{
+  "headers": ["order_id", "customer_id", "return_id"],
+  "rows": [
+    {
+      "order_id": "order_1001",
+      "customer_id": "customer_200",
+      "return_id": "return_3001"
+    }
+  ],
+  "rawRows": [["order_1001", "customer_200", "return_3001"]],
+  "rowCount": 1,
+  "truncated": false
+}
+```
+
+Analysis status response includes the current status, current step, dashboard message, progress percentage, and stage list:
+
+```json
+{
+  "jobId": "c8f7844b-f2fb-42a1-b45f-397d56f3ad2f",
+  "datasetId": "8f79f612-770b-48fd-9d25-79d88d1e4211",
+  "status": "NORMALIZING",
+  "currentStep": "NORMALIZING",
+  "message": "Normalizing CSV columns and refund records.",
+  "progressPercent": 20,
+  "stages": [
+    { "status": "UPLOADED", "message": "Dataset uploaded and ready to start analysis.", "state": "completed" },
+    { "status": "NORMALIZING", "message": "Normalizing CSV columns and refund records.", "state": "current" }
+  ]
+}
+```
+
+Upload/status errors use one JSON shape:
+
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "code": "INVALID_CSV",
+  "message": "uploaded CSV is empty",
+  "path": "/api/datasets/upload",
+  "timestamp": "2026-06-01T10:15:00Z"
+}
+```
+
+Common upload/status error codes: `INVALID_CSV`, `INVALID_DATASET_ID`, `INVALID_JOB_ID`, `DATASET_NOT_FOUND`, `JOB_NOT_FOUND`, `INVALID_ANALYSIS_STATUS`, `ANALYSIS_START_FAILED`.
+
 ## Relations Service
 
 | Method | Path | Purpose |

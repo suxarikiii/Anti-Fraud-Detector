@@ -60,13 +60,36 @@ func TestParseCSVPreviewCleanAndDirtyRefundFiles(t *testing.T) {
 			if got := preview.Headers[0]; got != tt.firstHeader {
 				t.Fatalf("first header = %q, want %q", got, tt.firstHeader)
 			}
-			if got := preview.Rows[0][0]; got != tt.firstCell {
+			if got := preview.Rows[0][tt.firstHeader]; got != tt.firstCell {
 				t.Fatalf("first row cell = %q, want %q", got, tt.firstCell)
 			}
 			if len(preview.Rows) != 2 {
 				t.Fatalf("rows = %d, want 2", len(preview.Rows))
 			}
+			if got := preview.RowCount; got != 2 {
+				t.Fatalf("rowCount = %d, want 2", got)
+			}
+			if preview.Truncated {
+				t.Fatal("preview should not be truncated")
+			}
 		})
+	}
+}
+
+func TestParseCSVPreviewTruncatesRows(t *testing.T) {
+	preview, err := parseCSVPreview(strings.NewReader(cleanRefundCSV), 1)
+	if err != nil {
+		t.Fatalf("parse preview: %v", err)
+	}
+
+	if len(preview.Rows) != 1 || preview.RowCount != 1 {
+		t.Fatalf("rows = %d rowCount = %d, want 1/1", len(preview.Rows), preview.RowCount)
+	}
+	if !preview.Truncated {
+		t.Fatal("preview should be marked as truncated")
+	}
+	if got := preview.RawRows[0][0]; got != "order_1001" {
+		t.Fatalf("raw row first cell = %q, want order_1001", got)
 	}
 }
 
@@ -149,7 +172,7 @@ func TestUploadPreviewStartStatusFlow(t *testing.T) {
 	if got := preview.Headers[0]; got != "order_id" {
 		t.Fatalf("preview first header = %q, want order_id", got)
 	}
-	if got := preview.Rows[0][0]; got != "order_1001" {
+	if got := preview.Rows[0]["order_id"]; got != "order_1001" {
 		t.Fatalf("preview first row = %q, want order_1001", got)
 	}
 
@@ -173,6 +196,9 @@ func TestUploadPreviewStartStatusFlow(t *testing.T) {
 	}
 	if !strings.Contains(status.Message, "Normalizing") {
 		t.Fatalf("message = %q, want dashboard-friendly normalizing message", status.Message)
+	}
+	if len(status.Stages) != len(orderedPipelineStatuses) {
+		t.Fatalf("status stages = %d, want %d", len(status.Stages), len(orderedPipelineStatuses))
 	}
 
 	if len(publisher.messages) != 1 {
@@ -215,6 +241,77 @@ func TestUpdateAnalysisStatus(t *testing.T) {
 	}
 }
 
+func TestPreviewDatasetNotFound(t *testing.T) {
+	ctx := context.Background()
+	svc := NewServiceWithStore(newFakeRepo(), newFakeStore(), &fakePublisher{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	_, err := svc.PreviewDataset(ctx, uuid.New())
+	if err == nil {
+		t.Fatal("expected missing dataset error")
+	}
+
+	var notFound *NotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("error type = %T, want NotFoundError", err)
+	}
+	if notFound.Resource != "dataset" {
+		t.Fatalf("resource = %q, want dataset", notFound.Resource)
+	}
+}
+
+func TestGetAnalysisStatusNotFound(t *testing.T) {
+	ctx := context.Background()
+	svc := NewServiceWithStore(newFakeRepo(), newFakeStore(), &fakePublisher{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	_, err := svc.GetAnalysisStatus(ctx, uuid.New())
+	if err == nil {
+		t.Fatal("expected missing job error")
+	}
+
+	var notFound *NotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("error type = %T, want NotFoundError", err)
+	}
+	if notFound.Resource != "analysis job" {
+		t.Fatalf("resource = %q, want analysis job", notFound.Resource)
+	}
+}
+
+func TestStartAnalysisMarksJobFailedWhenEventPublishFails(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	store := newFakeStore()
+	publisher := &fakePublisher{err: errors.New("rabbitmq unavailable")}
+	svc := NewServiceWithStore(repo, store, publisher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	_, uploadJobID, err := svc.UploadDataset(ctx, strings.NewReader(cleanRefundCSV), int64(len(cleanRefundCSV)), "clean_refund_dataset.csv")
+	if err != nil {
+		t.Fatalf("upload dataset: %v", err)
+	}
+
+	jobID, err := svc.StartAnalysis(ctx, repo.jobs[uploadJobID].DatasetID)
+	if err == nil {
+		t.Fatal("expected publish error")
+	}
+	if jobID != uploadJobID {
+		t.Fatalf("job id = %s, want upload job id %s", jobID, uploadJobID)
+	}
+
+	status, err := svc.GetAnalysisStatus(ctx, jobID)
+	if err != nil {
+		t.Fatalf("get status: %v", err)
+	}
+	if status.Status != domain.AnalysisStatusFailed {
+		t.Fatalf("status = %q, want FAILED", status.Status)
+	}
+	if status.Error != "Failed to publish dataset.uploaded event." {
+		t.Fatalf("error message = %q", status.Error)
+	}
+	if status.Stages[0].State != "failed" {
+		t.Fatalf("first stage state = %q, want failed", status.Stages[0].State)
+	}
+}
+
 type fakeMessage struct {
 	routingKey string
 	payload    interface{}
@@ -222,9 +319,13 @@ type fakeMessage struct {
 
 type fakePublisher struct {
 	messages []fakeMessage
+	err      error
 }
 
 func (p *fakePublisher) Publish(_ context.Context, routingKey string, payload interface{}) error {
+	if p.err != nil {
+		return p.err
+	}
 	p.messages = append(p.messages, fakeMessage{routingKey: routingKey, payload: payload})
 	return nil
 }
