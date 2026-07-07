@@ -29,8 +29,11 @@ const (
 )
 
 type PreviewResponse struct {
-	Headers []string   `json:"headers"`
-	Rows    [][]string `json:"rows"`
+	Headers   []string            `json:"headers"`
+	Rows      []map[string]string `json:"rows"`
+	RawRows   [][]string          `json:"rawRows"`
+	RowCount  int                 `json:"rowCount"`
+	Truncated bool                `json:"truncated"`
 }
 
 type StatusStage struct {
@@ -59,6 +62,15 @@ type InvalidUploadError struct {
 
 func (e *InvalidUploadError) Error() string {
 	return e.Message
+}
+
+type NotFoundError struct {
+	Resource string
+	ID       string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("%s not found: %s", e.Resource, e.ID)
 }
 
 type DatasetRepository interface {
@@ -155,6 +167,9 @@ func (s *Service) UploadDataset(ctx context.Context, file io.Reader, size int64,
 func (s *Service) PreviewDataset(ctx context.Context, datasetID uuid.UUID) (*PreviewResponse, error) {
 	uploadedFile, err := s.repo.GetUploadedFileByDatasetID(ctx, datasetID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &NotFoundError{Resource: "dataset", ID: datasetID.String()}
+		}
 		return nil, err
 	}
 
@@ -170,6 +185,9 @@ func (s *Service) PreviewDataset(ctx context.Context, datasetID uuid.UUID) (*Pre
 func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.UUID, error) {
 	uploadedFile, err := s.repo.GetUploadedFileByDatasetID(ctx, datasetID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return uuid.Nil, &NotFoundError{Resource: "dataset", ID: datasetID.String()}
+		}
 		return uuid.Nil, err
 	}
 
@@ -177,7 +195,7 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 
 	job, err := s.repo.GetLatestAnalysisJobByDatasetID(ctx, datasetID)
 	if err != nil {
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			return uuid.Nil, fmt.Errorf("get analysis job: %w", err)
 		}
 
@@ -207,7 +225,13 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 	}
 
 	if err := s.publisher.Publish(ctx, datasetUploadedRoutingKey, event); err != nil {
-		return uuid.Nil, fmt.Errorf("publish event: %w", err)
+		errorMessage := "Failed to publish dataset.uploaded event."
+		if updateErr := s.repo.UpdateAnalysisStatusWithError(ctx, job.ID, domain.AnalysisStatusFailed, job.CurrentStep, errorMessage, now); updateErr != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to mark analysis job as failed", "jobId", job.ID, "error", updateErr)
+			}
+		}
+		return job.ID, fmt.Errorf("publish event: %w", err)
 	}
 
 	if err := s.repo.UpdateAnalysisStatus(ctx, job.ID, domain.AnalysisStatusNormalizing, domain.AnalysisStatusNormalizing, now); err != nil {
@@ -220,6 +244,9 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 func (s *Service) GetAnalysisStatus(ctx context.Context, jobID uuid.UUID) (*AnalysisStatusResponse, error) {
 	job, err := s.repo.GetAnalysisJobByID(ctx, jobID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &NotFoundError{Resource: "analysis job", ID: jobID.String()}
+		}
 		return nil, err
 	}
 	return buildAnalysisStatusResponse(job), nil
@@ -227,6 +254,9 @@ func (s *Service) GetAnalysisStatus(ctx context.Context, jobID uuid.UUID) (*Anal
 
 func (s *Service) UpdateAnalysisStatus(ctx context.Context, jobID uuid.UUID, status, errorMessage string) (*AnalysisStatusResponse, error) {
 	status = strings.ToUpper(strings.TrimSpace(status))
+	if status == "" {
+		return nil, &InvalidUploadError{Message: "analysis status is required"}
+	}
 	if !isAllowedStatus(status) {
 		return nil, &InvalidUploadError{Message: fmt.Sprintf("unsupported analysis status %q", status)}
 	}
@@ -235,6 +265,9 @@ func (s *Service) UpdateAnalysisStatus(ctx context.Context, jobID uuid.UUID, sta
 	if status == domain.AnalysisStatusFailed {
 		job, err := s.repo.GetAnalysisJobByID(ctx, jobID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, &NotFoundError{Resource: "analysis job", ID: jobID.String()}
+			}
 			return nil, err
 		}
 		currentStep = job.CurrentStep
@@ -244,6 +277,9 @@ func (s *Service) UpdateAnalysisStatus(ctx context.Context, jobID uuid.UUID, sta
 	}
 
 	if err := s.repo.UpdateAnalysisStatusWithError(ctx, jobID, status, currentStep, errorMessage, time.Now().UTC()); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &NotFoundError{Resource: "analysis job", ID: jobID.String()}
+		}
 		return nil, err
 	}
 
@@ -260,8 +296,10 @@ func parseCSVPreview(reader io.Reader, limit int) (*PreviewResponse, error) {
 	}
 	headers = trimRecord(headers)
 
-	rows := make([][]string, 0, limit)
-	for len(rows) < limit {
+	rawRows := make([][]string, 0, limit)
+	rows := make([]map[string]string, 0, limit)
+	truncated := false
+	for {
 		record, err := csvReader.Read()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -269,10 +307,23 @@ func parseCSVPreview(reader io.Reader, limit int) (*PreviewResponse, error) {
 			}
 			return nil, fmt.Errorf("read csv row: %w", err)
 		}
-		rows = append(rows, trimRecord(record))
+		if len(rawRows) >= limit {
+			truncated = true
+			break
+		}
+
+		record = trimRecord(record)
+		rawRows = append(rawRows, record)
+		rows = append(rows, recordToPreviewRow(headers, record))
 	}
 
-	return &PreviewResponse{Headers: headers, Rows: rows}, nil
+	return &PreviewResponse{
+		Headers:   headers,
+		Rows:      rows,
+		RawRows:   rawRows,
+		RowCount:  len(rows),
+		Truncated: truncated,
+	}, nil
 }
 
 func validateUploadedCSV(filename string, data []byte) error {
@@ -433,6 +484,18 @@ func trimRecord(record []string) []string {
 		trimmed[i] = strings.TrimSpace(value)
 	}
 	return trimmed
+}
+
+func recordToPreviewRow(headers, record []string) map[string]string {
+	row := make(map[string]string, len(headers))
+	for index, header := range headers {
+		value := ""
+		if index < len(record) {
+			value = record[index]
+		}
+		row[header] = value
+	}
+	return row
 }
 
 func normalizeHeader(value string) string {

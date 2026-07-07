@@ -119,7 +119,7 @@ func (r *Repository) UpdateAnalysisStatus(ctx context.Context, jobID uuid.UUID, 
 }
 
 func (r *Repository) UpdateAnalysisStatusWithError(ctx context.Context, jobID uuid.UUID, status, currentStep, errorMessage string, updatedAt time.Time) error {
-	_, err := r.db.ExecContext(ctx,
+	result, err := r.db.ExecContext(ctx,
 		`UPDATE analysis_jobs SET status = $1, current_step = $2, error_message = $3, updated_at = $4 WHERE id = $5`,
 		status,
 		currentStep,
@@ -127,5 +127,17 @@ func (r *Repository) UpdateAnalysisStatusWithError(ctx context.Context, jobID uu
 		updatedAt,
 		jobID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }

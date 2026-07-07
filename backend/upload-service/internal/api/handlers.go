@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"time"
 
 	"upload-service/internal/service"
 
@@ -34,6 +35,15 @@ type response struct {
 	Status    string      `json:"status,omitempty"`
 }
 
+type errorResponse struct {
+	Status    int    `json:"status"`
+	Error     string `json:"error"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Path      string `json:"path"`
+	Timestamp string `json:"timestamp"`
+}
+
 type updateStatusRequest struct {
 	Status       string `json:"status"`
 	ErrorMessage string `json:"errorMessage,omitempty"`
@@ -46,14 +56,15 @@ func (h *Handler) HealthHandler(w http.ResponseWriter, _ *http.Request) {
 func (h *Handler) UploadHandler(w http.ResponseWriter, r *http.Request) {
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to read file: %v", err)
+		writeError(w, r, http.StatusBadRequest, "INVALID_UPLOAD", "CSV file field %q is required", "file")
 		return
 	}
 	defer file.Close()
 
 	buffer, err := readFile(file)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read upload: %v", err)
+		h.Logger.Error("failed to read upload", "error", err)
+		writeError(w, r, http.StatusInternalServerError, "UPLOAD_READ_FAILED", "failed to read uploaded file")
 		return
 	}
 
@@ -61,11 +72,11 @@ func (h *Handler) UploadHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var invalidUpload *service.InvalidUploadError
 		if errors.As(err, &invalidUpload) {
-			writeError(w, http.StatusBadRequest, invalidUpload.Message)
+			writeError(w, r, http.StatusBadRequest, "INVALID_CSV", invalidUpload.Message)
 			return
 		}
 		h.Logger.Error("upload service error", "error", err)
-		writeError(w, http.StatusInternalServerError, "upload error: %v", err)
+		writeError(w, r, http.StatusInternalServerError, "UPLOAD_FAILED", "failed to upload dataset")
 		return
 	}
 
@@ -76,14 +87,19 @@ func (h *Handler) PreviewHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	datasetID, err := uuid.Parse(vars["datasetId"])
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid dataset id")
+		writeError(w, r, http.StatusBadRequest, "INVALID_DATASET_ID", "invalid dataset id")
 		return
 	}
 
 	preview, err := h.Service.PreviewDataset(r.Context(), datasetID)
 	if err != nil {
+		var notFound *service.NotFoundError
+		if errors.As(err, &notFound) {
+			writeError(w, r, http.StatusNotFound, "DATASET_NOT_FOUND", notFound.Error())
+			return
+		}
 		h.Logger.Error("preview error", "error", err)
-		writeError(w, http.StatusNotFound, "preview not available: %v", err)
+		writeError(w, r, http.StatusInternalServerError, "PREVIEW_FAILED", "failed to load dataset preview")
 		return
 	}
 
@@ -94,32 +110,46 @@ func (h *Handler) StartAnalysisHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	datasetID, err := uuid.Parse(vars["datasetId"])
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid dataset id")
+		writeError(w, r, http.StatusBadRequest, "INVALID_DATASET_ID", "invalid dataset id")
 		return
 	}
 
 	jobID, err := h.Service.StartAnalysis(r.Context(), datasetID)
 	if err != nil {
+		var notFound *service.NotFoundError
+		if errors.As(err, &notFound) {
+			writeError(w, r, http.StatusNotFound, "DATASET_NOT_FOUND", notFound.Error())
+			return
+		}
 		h.Logger.Error("start analysis error", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to start analysis: %v", err)
+		writeError(w, r, http.StatusBadGateway, "ANALYSIS_START_FAILED", "failed to start analysis; job was marked FAILED when possible")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, response{JobID: jobID.String()})
+	statusValue := "NORMALIZING"
+	if status, statusErr := h.Service.GetAnalysisStatus(r.Context(), jobID); statusErr == nil {
+		statusValue = status.Status
+	}
+	writeJSON(w, http.StatusCreated, response{JobID: jobID.String(), Status: statusValue})
 }
 
 func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	jobID, err := uuid.Parse(vars["jobId"])
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid job id")
+		writeError(w, r, http.StatusBadRequest, "INVALID_JOB_ID", "invalid job id")
 		return
 	}
 
 	status, err := h.Service.GetAnalysisStatus(r.Context(), jobID)
 	if err != nil {
+		var notFound *service.NotFoundError
+		if errors.As(err, &notFound) {
+			writeError(w, r, http.StatusNotFound, "JOB_NOT_FOUND", notFound.Error())
+			return
+		}
 		h.Logger.Error("status lookup error", "error", err)
-		writeError(w, http.StatusNotFound, "job not found: %v", err)
+		writeError(w, r, http.StatusInternalServerError, "STATUS_LOOKUP_FAILED", "failed to load analysis status")
 		return
 	}
 
@@ -130,13 +160,13 @@ func (h *Handler) UpdateStatusHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	jobID, err := uuid.Parse(vars["jobId"])
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid job id")
+		writeError(w, r, http.StatusBadRequest, "INVALID_JOB_ID", "invalid job id")
 		return
 	}
 
 	var request updateStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid status update body")
+		writeError(w, r, http.StatusBadRequest, "INVALID_STATUS_BODY", "invalid status update body")
 		return
 	}
 
@@ -144,11 +174,16 @@ func (h *Handler) UpdateStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var invalidStatus *service.InvalidUploadError
 		if errors.As(err, &invalidStatus) {
-			writeError(w, http.StatusBadRequest, invalidStatus.Message)
+			writeError(w, r, http.StatusBadRequest, "INVALID_ANALYSIS_STATUS", invalidStatus.Message)
+			return
+		}
+		var notFound *service.NotFoundError
+		if errors.As(err, &notFound) {
+			writeError(w, r, http.StatusNotFound, "JOB_NOT_FOUND", notFound.Error())
 			return
 		}
 		h.Logger.Error("status update error", "error", err)
-		writeError(w, http.StatusNotFound, "failed to update job status: %v", err)
+		writeError(w, r, http.StatusInternalServerError, "STATUS_UPDATE_FAILED", "failed to update analysis status")
 		return
 	}
 
@@ -165,7 +200,14 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func writeError(w http.ResponseWriter, status int, format string, args ...interface{}) {
+func writeError(w http.ResponseWriter, r *http.Request, status int, code, format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
-	writeJSON(w, status, response{Message: message})
+	writeJSON(w, status, errorResponse{
+		Status:    status,
+		Error:     http.StatusText(status),
+		Code:      code,
+		Message:   message,
+		Path:      r.URL.Path,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
 }
