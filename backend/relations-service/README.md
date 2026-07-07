@@ -100,9 +100,11 @@ Additional prepared fields:
 | `categoryRefundRate` | number | Returns in this category divided by all in-memory normalized records. |
 | `refundAmountRatio` | number | `refundAmount / orderAmount`. |
 | `similarReturnsCount` | integer | Same reason + category + agent, excluding current return. |
-| `sameReasonRefundCount` | integer | Records with the same return reason. |
+| `sameReasonRefundCount` | integer | Records with the same return reason handled by the same support agent. |
 | `strongestRelationType` | string | Dominant relation pattern. |
 | `topRelatedReturns` | string array | Related return IDs from the strongest local patterns. |
+| `explanationSummary` | string | Short business-readable explanation of the strongest signal. |
+| `explanationSignals` | string array | Human-readable investigation signals for scoring details and frontend pages. |
 
 Example:
 
@@ -119,13 +121,22 @@ Example:
     "agentHighValueApprovalCount": 5,
     "customerAgentPairCount": 5,
     "agentCustomerInteractionCount": 5,
-    "categoryRefundRate": 0.27,
+    "categoryRefundRate": 0.16,
     "refundAmountRatio": 0.87,
     "similarReturnsCount": 0,
-    "sameReasonRefundCount": 13,
-    "clusterSize": 13,
-    "strongestRelationType": "SAME_REASON_PATTERN",
-    "topRelatedReturns": ["return_3042", "return_3043", "return_3044", "return_3045"]
+    "sameReasonRefundCount": 2,
+    "clusterSize": 5,
+    "strongestRelationType": "CUSTOMER_RETURN_PATTERN",
+    "topRelatedReturns": ["return_3042", "return_3043", "return_3044", "return_3045"],
+    "explanationSummary": "Customer refund history is the strongest relation signal.",
+    "explanationSignals": [
+      "Customer has 5 refund requests in the demo dataset.",
+      "Support agent approval rate is 100%.",
+      "Customer and support agent interacted on 5 return requests.",
+      "Refund amount is 87% of the original order amount.",
+      "Relation cluster fallback size is 5.",
+      "Related returns for investigation: return_3042, return_3043, return_3044, return_3045."
+    ]
   }
 }
 ```
@@ -209,6 +220,19 @@ curl http://localhost:8082/api/relations/returns/return_3041/features
 curl http://localhost:8082/api/relations/datasets/demo/returns/return_3041/features
 curl http://localhost:8082/api/relations/returns/return_3006/features
 curl -X POST http://localhost:8082/api/relations/datasets/demo/rebuild
+```
+
+Week 5 product demo cases:
+
+```bash
+# suspicious cluster: frequent customer returns + repeated customer-agent pair
+curl http://localhost:8082/api/relations/datasets/demo/returns/return_3041/features
+
+# repeated customer-agent approval pattern
+curl http://localhost:8082/api/relations/datasets/demo/returns/return_3036/features
+
+# high-value approval without evidence, explained mostly through agent behavior
+curl http://localhost:8082/api/relations/datasets/demo/returns/return_3006/features
 ```
 
 Unknown return IDs return `404 Not Found`.
@@ -333,7 +357,34 @@ Why it is useful for investigation:
 * `customerReturnCount` shows frequent returns by the same customer;
 * `customerAgentPairCount` shows repeated customer-agent interaction;
 * `agentApprovalRate` shows unusual support agent approval behavior;
-* `strongestRelationType` and `topRelatedReturns` explain the relation pattern to an analyst.
+* `strongestRelationType`, `topRelatedReturns`, `explanationSummary`, and `explanationSignals` explain the relation pattern to an analyst.
+
+---
+
+<h2 align="center">Design Decision</h2>
+
+Relations Service is separate from Scoring Service because it answers a different product question.
+
+Scoring decides how risky a refund approval is. Relations explains why the case is connected to suspicious behavior: repeated customer returns, repeated customer-agent interactions, agent-level approval patterns, similar returns, and related return IDs for investigation.
+
+Keeping this layer separate makes the MVP easier to evolve:
+
+* Scoring can change risk weights without rebuilding graph/relation extraction.
+* Frontend can show relation context on the refund details page without duplicating scoring rules.
+* Future Graph DB traversal can replace the current CSV/in-memory implementation behind the same API contract.
+
+---
+
+<h2 align="center">Feedback-Driven Refinement</h2>
+
+Week 5 focuses on making features understandable for business users, not only technically available.
+
+Prioritized changes:
+
+* scoped `sameReasonRefundCount` to the same support agent so common global reasons do not dominate explanations;
+* kept `clusterSize` as a stable fallback over local relation counts;
+* added `explanationSummary` and `explanationSignals` for scoring explanations and frontend details;
+* documented demo cases and smoke commands for report evidence.
 
 RabbitMQ integration is available as a local/demo stub through `POST /api/relations/datasets/{datasetId}/rebuild` and the `refund.relations.built` publisher. Full end-to-end scoring consumption remains a team integration point with Scoring Service.
 

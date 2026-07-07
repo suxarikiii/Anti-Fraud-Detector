@@ -299,7 +299,7 @@ func (s *Service) calculateFeatures(target domain.NormalizedReturnRecord) domain
 			categoryReturnCount++
 		}
 
-		if record.ReturnReason == target.ReturnReason {
+		if record.ReturnReason == target.ReturnReason && record.SupportAgentID == target.SupportAgentID {
 			sameReasonRefundCount++
 		}
 
@@ -315,6 +315,18 @@ func (s *Service) calculateFeatures(target domain.NormalizedReturnRecord) domain
 	topRelatedReturns = uniqueStrings(topRelatedReturns)
 	clusterSize := maxInt(customerReturnCount, agentDecisionCount, customerAgentPairCount, sameReasonRefundCount)
 
+	strongestRelation := strongestRelationType(customerReturnCount, agentDecisionCount, customerAgentPairCount, sameReasonRefundCount)
+	signals := explanationSignals(
+		customerReturnCount,
+		agentApprovedCount,
+		agentDecisionCount,
+		customerAgentPairCount,
+		sameReasonRefundCount,
+		clusterSize,
+		ratioFloat(target.RefundAmount, target.OrderAmount),
+		topRelatedReturns,
+	)
+
 	return domain.RelationFeatures{
 		CustomerReturnCount:           customerReturnCount,
 		CustomerApprovedRefundCount:   customerApprovedRefundCount,
@@ -328,8 +340,10 @@ func (s *Service) calculateFeatures(target domain.NormalizedReturnRecord) domain
 		SimilarReturnsCount:           similarReturnsCount,
 		SameReasonRefundCount:         sameReasonRefundCount,
 		ClusterSize:                   clusterSize,
-		StrongestRelationType:         strongestRelationType(customerReturnCount, agentDecisionCount, customerAgentPairCount, sameReasonRefundCount),
+		StrongestRelationType:         strongestRelation,
 		TopRelatedReturns:             topRelatedReturns,
+		ExplanationSummary:            explanationSummary(strongestRelation),
+		ExplanationSignals:            signals,
 	}
 }
 
@@ -656,6 +670,53 @@ func strongestRelationType(customerReturnCount, agentDecisionCount, customerAgen
 	})
 
 	return candidates[0].name
+}
+
+func explanationSummary(strongestRelation string) string {
+	switch strongestRelation {
+	case "CUSTOMER_RETURN_PATTERN":
+		return "Customer refund history is the strongest relation signal."
+	case "AGENT_DECISION_PATTERN":
+		return "Support agent decision history is the strongest relation signal."
+	case "CUSTOMER_AGENT_PAIR":
+		return "Repeated customer-agent interaction is the strongest relation signal."
+	case "SAME_REASON_PATTERN":
+		return "Shared return reason is the strongest relation signal."
+	default:
+		return "Relation features provide additional investigation context."
+	}
+}
+
+func explanationSignals(customerReturnCount, agentApprovedCount, agentDecisionCount, customerAgentPairCount, sameReasonRefundCount, clusterSize int, refundAmountRatio float64, topRelatedReturns []string) []string {
+	signals := make([]string, 0, 6)
+
+	if customerReturnCount >= 5 {
+		signals = append(signals, fmt.Sprintf("Customer has %d refund requests in the demo dataset.", customerReturnCount))
+	}
+	if agentDecisionCount > 0 && ratio(agentApprovedCount, agentDecisionCount) >= 0.9 {
+		signals = append(signals, fmt.Sprintf("Support agent approval rate is %.0f%%.", ratio(agentApprovedCount, agentDecisionCount)*100))
+	}
+	if customerAgentPairCount >= 3 {
+		signals = append(signals, fmt.Sprintf("Customer and support agent interacted on %d return requests.", customerAgentPairCount))
+	}
+	if sameReasonRefundCount >= 5 {
+		signals = append(signals, fmt.Sprintf("%d returns share the same return reason.", sameReasonRefundCount))
+	}
+	if refundAmountRatio >= 0.8 {
+		signals = append(signals, fmt.Sprintf("Refund amount is %.0f%% of the original order amount.", refundAmountRatio*100))
+	}
+	if clusterSize >= 5 {
+		signals = append(signals, fmt.Sprintf("Relation cluster fallback size is %d.", clusterSize))
+	}
+	if len(topRelatedReturns) > 0 {
+		signals = append(signals, fmt.Sprintf("Related returns for investigation: %s.", strings.Join(topRelatedReturns, ", ")))
+	}
+
+	if len(signals) == 0 {
+		signals = append(signals, "No strong relation signal crossed the current demo thresholds.")
+	}
+
+	return signals
 }
 
 func uniqueStrings(values []string) []string {

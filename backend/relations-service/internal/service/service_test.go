@@ -59,6 +59,28 @@ func TestCalculateClusterSizeFallback(t *testing.T) {
 	}
 }
 
+func TestStrongestRelationAndTopRelatedReturnsExplainRisk(t *testing.T) {
+	svc := NewServiceWithRecords(nil, featureTestRecords())
+
+	features, err := svc.GetReturnFeatures("return_a")
+	if err != nil {
+		t.Fatalf("GetReturnFeatures returned error: %v", err)
+	}
+
+	if features.Features.StrongestRelationType == "" {
+		t.Fatal("strongestRelationType should not be empty")
+	}
+	if len(features.Features.TopRelatedReturns) == 0 {
+		t.Fatal("topRelatedReturns should not be empty")
+	}
+	if features.Features.ExplanationSummary == "" {
+		t.Fatal("explanationSummary should not be empty")
+	}
+	if len(features.Features.ExplanationSignals) == 0 {
+		t.Fatal("explanationSignals should not be empty")
+	}
+}
+
 func TestDatasetAwareFeatures(t *testing.T) {
 	svc := NewServiceWithRecords(nil, featureTestRecords())
 
@@ -107,6 +129,35 @@ func TestCleanRefundDatasetSupportsAllDemoReturnIDs(t *testing.T) {
 		if features.Features.CustomerReturnCount == 0 {
 			t.Fatalf("%s customerReturnCount is zero", returnID)
 		}
+	}
+}
+
+func TestCleanRefundDatasetHighRiskDemoCaseHasBusinessSignals(t *testing.T) {
+	records, err := loadRecords(Options{
+		DatasetID:   "demo",
+		DatasetPath: "../../../../data/clean_refund_dataset.csv",
+	})
+	if err != nil {
+		t.Fatalf("loadRecords returned error: %v", err)
+	}
+
+	svc := NewServiceWithRecords(nil, records)
+	features, err := svc.GetReturnFeaturesForDataset("demo", "return_3041")
+	if err != nil {
+		t.Fatalf("GetReturnFeaturesForDataset returned error: %v", err)
+	}
+
+	if features.Features.CustomerReturnCount < 5 {
+		t.Fatalf("customerReturnCount = %d, want at least 5", features.Features.CustomerReturnCount)
+	}
+	if features.Features.AgentApprovalRate < 0.9 {
+		t.Fatalf("agentApprovalRate = %.2f, want at least 0.9", features.Features.AgentApprovalRate)
+	}
+	if features.Features.CustomerAgentPairCount < 5 {
+		t.Fatalf("customerAgentPairCount = %d, want at least 5", features.Features.CustomerAgentPairCount)
+	}
+	if len(features.Features.ExplanationSignals) < 3 {
+		t.Fatalf("explanationSignals length = %d, want at least 3", len(features.Features.ExplanationSignals))
 	}
 }
 
