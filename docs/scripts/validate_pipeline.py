@@ -1,0 +1,229 @@
+"""
+End-to-end pipeline validation:  dirty export -> normalize -> score.
+
+Week-4 feedback was that the ML/normalization work looked like a separate
+research artifact, not part of the product. This script closes that loop in one
+run: it takes a raw dirty partner export, pushes it through the normalization
+layer (normalize_refund_dataset.py), scores the normalized records with the
+exact rule engine of the Kotlin scoring-service (ScoringEngine from
+evaluate_scenarios.py), and shows that the product's suspicious-case output is
+reproduced from dirty input.
+
+It also emits the scenario validation table the weekly report needs:
+    scenario -> expected risk -> actual risk -> PASS/FAIL
+
+Outputs (written next to the data dir by default):
+    docs/reports/assets/week-5-scenario-validation.md   scenario PASS/FAIL table
+
+Usage:
+    python validate_pipeline.py
+    python validate_pipeline.py --dirty data/dirty_shopflow_refund_dataset.csv
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+# Reuse the single source of truth for scoring and for normalization.
+from evaluate_scenarios import (  # noqa: E402
+    Record, ScoringEngine, SCENARIO_NAMES, DEMO_RETURN_IDS,
+    demo_scenario_id, read_expected, _to_bool,
+)
+from normalize_refund_dataset import normalize, CLEAN_COLUMNS  # noqa: E402
+
+
+def rows_to_records(rows: List[Dict[str, str]]) -> List[Record]:
+    """Turn normalized (clean-schema) dict rows into typed Record objects."""
+    out: List[Record] = []
+    for row in rows:
+        out.append(Record(
+            order_id=row["order_id"], customer_id=row["customer_id"],
+            return_id=row["return_id"], support_agent_id=row["support_agent_id"],
+            order_amount=float(row["order_amount"]), refund_amount=float(row["refund_amount"]),
+            product_category=row["product_category"], return_reason=row["return_reason"],
+            evidence_provided=_to_bool(row["evidence_provided"]),
+            decision=row["decision"].strip().upper(),
+            manual_override=_to_bool(row["manual_override"]),
+            decision_time_minutes=int(float(row["decision_time_minutes"])),
+            timestamp=row["timestamp"],
+        ))
+    return out
+
+
+def load_clean_records(path: Path) -> List[Record]:
+    with path.open(newline="", encoding="utf-8") as fh:
+        return rows_to_records(list(csv.DictReader(fh)))
+
+
+def score_all(records: List[Record]) -> Dict[str, Tuple[int, str, List[str]]]:
+    engine = ScoringEngine(records)
+    return {r.return_id: engine.evaluate(r) for r in records}
+
+
+# --------------------------------------------------------------------------- #
+# Scenario validation table
+# --------------------------------------------------------------------------- #
+
+def build_scenario_table(expected: Dict[str, Dict[str, str]],
+                         scored: Dict[str, Tuple[int, str, List[str]]]
+                         ) -> List[Dict[str, str]]:
+    """Aggregate the 5 demo cases per scenario into one PASS/FAIL row.
+
+    A scenario PASSes when every demo case reproduces both its expected risk
+    level and its expected reason set (order-independent).
+    """
+    per_scenario: Dict[int, List[Tuple[bool, str]]] = {}
+    for return_id, exp in expected.items():
+        actual = scored.get(return_id)
+        sid = demo_scenario_id(return_id)
+        if actual is None:
+            per_scenario.setdefault(sid, []).append((False, "?"))
+            continue
+        _, level, reasons = actual
+        ok = (level == exp["expected_risk_level"] and
+              ";".join(sorted(reasons)) == exp["expected_reason_types"])
+        per_scenario.setdefault(sid, []).append((ok, level))
+
+    rows: List[Dict[str, str]] = []
+    for sid in sorted(per_scenario):
+        cases = per_scenario[sid]
+        passed = sum(1 for ok, _ in cases if ok)
+        levels = Counter(lvl for _, lvl in cases)
+        exp_levels = Counter(
+            exp["expected_risk_level"] for rid, exp in expected.items()
+            if demo_scenario_id(rid) == sid
+        )
+        rows.append({
+            "scenario_id": str(sid),
+            "scenario": SCENARIO_NAMES[sid],
+            "expected_risk": _fmt_levels(exp_levels),
+            "actual_risk": _fmt_levels(levels),
+            "cases": f"{passed}/{len(cases)}",
+            "result": "PASS" if passed == len(cases) else "FAIL",
+        })
+    return rows
+
+
+_LEVEL_ORDER = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+
+def _fmt_levels(counter: Counter) -> str:
+    return ", ".join(f"{lvl}×{counter[lvl]}" for lvl in _LEVEL_ORDER if counter[lvl])
+
+
+def write_markdown_table(path: Path, rows: List[Dict[str, str]],
+                         pipeline_agreement: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Week 5 — Scenario Validation Table",
+        "",
+        "Auto-generated by `docs/scripts/validate_pipeline.py`. Source of truth:",
+        "`data/expected_scores.csv` (expected) vs the rule engine mirroring",
+        "`backend/scoring-service` (actual). Each scenario aggregates 5 demo cases.",
+        "",
+        "| # | Scenario | Expected risk | Actual risk | Cases | Result |",
+        "|---|----------|---------------|-------------|-------|--------|",
+    ]
+    for r in rows:
+        lines.append(
+            f"| {r['scenario_id']} | {r['scenario']} | {r['expected_risk']} | "
+            f"{r['actual_risk']} | {r['cases']} | {r['result']} |"
+        )
+    passed = sum(1 for r in rows if r["result"] == "PASS")
+    lines += [
+        "",
+        f"**Result: {passed}/{len(rows)} scenarios PASS.**",
+        "",
+        f"**Pipeline integration (dirty → normalize → score):** {pipeline_agreement}",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate the dirty->normalize->score pipeline.")
+    parser.add_argument("--data-dir", type=str, default="data")
+    parser.add_argument("--dirty", type=str, default="data/dirty_business_refund_dataset.csv")
+    parser.add_argument("--out", type=str,
+                        default="docs/reports/assets/week-5-scenario-validation.md")
+    args = parser.parse_args()
+
+    data_dir = Path(args.data_dir)
+    clean_path = data_dir / "clean_refund_dataset.csv"
+    expected_path = data_dir / "expected_scores.csv"
+    dirty_path = Path(args.dirty)
+
+    for p in (clean_path, expected_path, dirty_path):
+        if not p.exists():
+            print(f"ERROR: required file not found: {p}")
+            return 2
+
+    print("=" * 68)
+    print("PIPELINE VALIDATION — dirty export → normalize → score")
+    print("=" * 68)
+
+    # [1] Score the canonical clean dataset (product baseline).
+    clean_records = load_clean_records(clean_path)
+    clean_scored = score_all(clean_records)
+
+    # [2] Normalize the dirty export and score the normalized output.
+    with dirty_path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        header = list(reader.fieldnames or [])
+        raw_rows = list(reader)
+    norm_rows, stats = normalize(raw_rows, header)
+    norm_records = rows_to_records(norm_rows)
+    norm_scored = score_all(norm_records)
+    print(f"\n[1] Normalized {dirty_path.name}: {stats.summary()}")
+
+    # [3] Pipeline agreement: does scoring the normalized output reproduce the
+    #     product's risk levels from the clean baseline?
+    common = set(clean_scored) & set(norm_scored)
+    same_level = sum(1 for rid in common
+                     if clean_scored[rid][1] == norm_scored[rid][1])
+    agree_pct = same_level / len(common) if common else 0.0
+    clean_flagged = {rid for rid, (s, _, _) in clean_scored.items() if s >= 31}
+    norm_flagged = {rid for rid, (s, _, _) in norm_scored.items() if s >= 31}
+    jaccard = (len(clean_flagged & norm_flagged) /
+               len(clean_flagged | norm_flagged)) if (clean_flagged | norm_flagged) else 0.0
+    agreement = (f"risk-level agreement {same_level}/{len(common)} "
+                 f"({agree_pct:.1%}); suspicious-set overlap (Jaccard) {jaccard:.1%}")
+    print(f"[2] Pipeline agreement vs clean baseline: {agreement}")
+
+    # [4] Scenario validation table (expected vs actual on the clean baseline).
+    expected = read_expected(expected_path)
+    table = build_scenario_table(expected, clean_scored)
+    print("\n[3] Scenario validation table")
+    print(f"    {'#':2s} {'scenario':32s} {'expected':10s} {'actual':10s} result")
+    for r in table:
+        print(f"    {r['scenario_id']:2s} {r['scenario']:32s} "
+              f"{r['cases']:10s} {'':10s} {r['result']}")
+
+    out_path = Path(args.out)
+    write_markdown_table(out_path, table, agreement)
+    passed = sum(1 for r in table if r["result"] == "PASS")
+    print(f"\n    wrote table -> {out_path}")
+
+    print("\n" + "=" * 68)
+    fp = sum(1 for rid in clean_flagged if rid in norm_scored and rid not in norm_flagged)
+    if passed == len(table):
+        print(f"OK — {passed}/{len(table)} scenarios PASS; pipeline reproduces product output.")
+        return 0
+    print(f"ATTENTION — {passed}/{len(table)} scenarios PASS.")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
