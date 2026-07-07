@@ -81,6 +81,41 @@ Common upload/status error codes: `INVALID_CSV`, `INVALID_DATASET_ID`, `INVALID_
 | `GET` | `/api/relations/agents/{agentId}/summary` | Support agent summary. |
 | `POST` | `/api/relations/datasets/{datasetId}/rebuild` | Rebuild relation features. |
 
+Relation features response:
+
+```json
+{
+  "returnId": "return_3041",
+  "customerId": "customer_999",
+  "supportAgentId": "agent_999",
+  "features": {
+    "customerReturnCount": 5,
+    "customerApprovedRefundCount": 5,
+    "agentApprovalRate": 1,
+    "agentManualOverrideRate": 1,
+    "agentHighValueApprovalCount": 5,
+    "customerAgentPairCount": 5,
+    "agentCustomerInteractionCount": 5,
+    "categoryRefundRate": 0.16,
+    "refundAmountRatio": 0.87,
+    "similarReturnsCount": 0,
+    "sameReasonRefundCount": 2,
+    "clusterSize": 5,
+    "strongestRelationType": "CUSTOMER_RETURN_PATTERN",
+    "topRelatedReturns": ["return_3042", "return_3043", "return_3044", "return_3045"],
+    "explanationSummary": "Customer refund history is the strongest relation signal.",
+    "explanationSignals": [
+      "Customer has 5 refund requests in the demo dataset.",
+      "Support agent approval rate is 100%.",
+      "Customer and support agent interacted on 5 return requests.",
+      "Refund amount is 87% of the original order amount.",
+      "Relation cluster fallback size is 5.",
+      "Related returns for investigation: return_3042, return_3043, return_3044, return_3045."
+    ]
+  }
+}
+```
+
 ## Scoring Service
 
 | Method | Path | Purpose |

@@ -104,4 +104,6 @@ type RelationFeatures struct {
 	ClusterSize                   int      `json:"clusterSize"`
 	StrongestRelationType         string   `json:"strongestRelationType"`
 	TopRelatedReturns             []string `json:"topRelatedReturns"`
+	ExplanationSummary            string   `json:"explanationSummary"`
+	ExplanationSignals            []string `json:"explanationSignals"`
 }
