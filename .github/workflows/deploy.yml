@@ -64,6 +64,7 @@ jobs:
           [ -f .env ] || cp .env.example .env
           docker compose pull
           docker compose up -d --no-build --remove-orphans
+          docker compose restart gateway
           docker image prune -f
       - name: Verify deployment
         run: |
@@ -71,5 +72,5 @@ jobs:
           echo "Checking Gateway health..."
           curl -f http://localhost:8080/health || (echo "Gateway health check failed" && exit 1)
           echo "Checking Frontend availability..."
-          curl -f http://localhost:3000 || (echo "Frontend not reachable" && exit 1)
+          curl -f http://localhost:80 || (echo "Frontend not reachable" && exit 1)
           echo "All services are healthy!"
