@@ -8,9 +8,13 @@ All frontend calls should go through the gateway using `/api/...`.
 | --- | --- | --- |
 | `GET` | `/api/datasets/health` | Upload service health. |
 | `POST` | `/api/datasets/upload` | Upload CSV refund dataset. |
+| `GET` | `/api/datasets?status=&from=&to=&page=&pageSize=` | Paginated dataset list with latest status. |
+| `GET` | `/api/datasets/{datasetId}` | Metadata, analysis history, and lifecycle audit. |
 | `GET` | `/api/datasets/{datasetId}/preview` | Preview uploaded rows. |
+| `POST` | `/api/datasets/{datasetId}/archive` | Terminal-only soft archive. |
 | `POST` | `/api/analysis/{datasetId}/start` | Start analysis for uploaded dataset. |
 | `GET` | `/api/analysis/{jobId}/status` | Read analysis status. |
+| `POST` | `/api/analysis/{jobId}/retry` | Create/start an idempotent retry job. |
 
 Status values:
 
@@ -37,7 +41,7 @@ Preview response:
 }
 ```
 
-Analysis status response includes the current status, current step, dashboard message, progress percentage, and stage list:
+Analysis status response also includes result availability, retry linkage, lifecycle timestamps, and readable failure context:
 
 ```json
 {
@@ -47,6 +51,7 @@ Analysis status response includes the current status, current step, dashboard me
   "currentStep": "NORMALIZING",
   "message": "Normalizing CSV columns and refund records.",
   "progressPercent": 20,
+  "resultReady": false,
   "stages": [
     { "status": "UPLOADED", "message": "Dataset uploaded and ready to start analysis.", "state": "completed" },
     { "status": "NORMALIZING", "message": "Normalizing CSV columns and refund records.", "state": "current" }
@@ -54,20 +59,24 @@ Analysis status response includes the current status, current step, dashboard me
 }
 ```
 
-Upload/status errors use one JSON shape:
+CSV validation errors aggregate row/column issues and warnings:
 
 ```json
 {
   "status": 400,
   "error": "Bad Request",
   "code": "INVALID_CSV",
-  "message": "uploaded CSV is empty",
+  "message": "CSV validation failed with 2 error(s)",
   "path": "/api/datasets/upload",
-  "timestamp": "2026-06-01T10:15:00Z"
+  "timestamp": "2026-06-01T10:15:00Z",
+  "errors": [
+    {"row": 2, "column": "return_id", "code": "EMPTY_REQUIRED", "message": "row 2 has empty required field return_id"}
+  ],
+  "warnings": []
 }
 ```
 
-Common upload/status error codes: `INVALID_CSV`, `INVALID_DATASET_ID`, `INVALID_JOB_ID`, `DATASET_NOT_FOUND`, `JOB_NOT_FOUND`, `INVALID_ANALYSIS_STATUS`, `ANALYSIS_START_FAILED`.
+The normal release flow is event-driven. Manual status PATCH is absent unless the service is explicitly started with `ADMIN_STATUS_PATCH_ENABLED=true`.
 
 ## Relations Service
 

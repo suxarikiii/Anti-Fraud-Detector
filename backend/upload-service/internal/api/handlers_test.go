@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"upload-service/internal/domain"
+	"upload-service/internal/repository"
 	"upload-service/internal/service"
 
 	"github.com/google/uuid"
@@ -38,6 +39,9 @@ func TestUploadHandlerEmptyCSVReturnsStructuredError(t *testing.T) {
 	}
 	if response.Message != "uploaded CSV is empty" {
 		t.Fatalf("message = %q, want empty CSV message", response.Message)
+	}
+	if len(response.Errors) != 1 || response.Errors[0].Code != "EMPTY_FILE" {
+		t.Fatalf("validation errors = %+v", response.Errors)
 	}
 	if response.Path != "/api/datasets/upload" {
 		t.Fatalf("path = %q, want upload path", response.Path)
@@ -80,6 +84,31 @@ func TestStatusHandlerJobNotFoundReturnsStructuredError(t *testing.T) {
 	response := decodeErrorResponse(t, recorder.Body)
 	if response.Code != "JOB_NOT_FOUND" {
 		t.Fatalf("code = %q, want JOB_NOT_FOUND", response.Code)
+	}
+}
+
+func TestListDatasetsHandlerEmptyStateAndInvalidPagination(t *testing.T) {
+	handler := newTestHandler()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/datasets?page=1&pageSize=20", nil)
+	recorder := httptest.NewRecorder()
+	handler.ListDatasetsHandler(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("empty list status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var list service.DatasetListResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Total != 0 || len(list.Items) != 0 || list.Page != 1 {
+		t.Fatalf("list=%+v", list)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/datasets?page=zero", nil)
+	recorder = httptest.NewRecorder()
+	handler.ListDatasetsHandler(recorder, request)
+	if recorder.Code != http.StatusBadRequest || decodeErrorResponse(t, recorder.Body).Code != "INVALID_PAGE" {
+		t.Fatalf("invalid page status=%d", recorder.Code)
 	}
 }
 
@@ -152,6 +181,10 @@ func (s *apiFakeStore) Get(_ context.Context, objectName string) (io.ReadCloser,
 type apiFakeRepo struct {
 	files map[uuid.UUID]*domain.UploadedFile
 	jobs  map[uuid.UUID]*domain.AnalysisJob
+}
+
+func (r *apiFakeRepo) ListDatasets(context.Context, repository.DatasetFilter) ([]repository.DatasetListItem, int, error) {
+	return []repository.DatasetListItem{}, 0, nil
 }
 
 func newAPIFakeRepo() *apiFakeRepo {

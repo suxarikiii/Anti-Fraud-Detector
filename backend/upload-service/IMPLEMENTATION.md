@@ -1,186 +1,47 @@
-### Upload Service
+# Upload Service implementation
 
-Upload Service accepts refund CSV datasets, validates the uploaded file, stores raw files in MinIO,
-creates dataset/job records in PostgreSQL, returns CSV previews, and starts the analysis flow by
-publishing `dataset.uploaded`.
+Upload Service owns bounded CSV ingestion and the lifecycle of every analysis job.
 
-### Run
+## Runtime flow
 
-From the repository root:
+1. `POST /api/datasets/upload` validates the extension, MIME, headers, row shape and business fields while spooling at most `UPLOAD_MAX_FILE_SIZE_BYTES` to a temporary file.
+2. The validated file is stored as `datasets/<datasetId>.csv` in MinIO. Dataset, file metadata, initial `UPLOADED` job, and audit record are committed in one PostgreSQL transaction. A database failure triggers compensating MinIO deletion.
+3. `POST /api/analysis/{datasetId}/start` locks and claims the latest `UPLOADED` job before publishing persistent `dataset.uploaded`. Concurrent/repeated calls return the same job without another publish.
+4. The durable queue consumes `dataset.normalized`, `refund.relations.built`, `refund.scoring.completed`, and `pipeline.failed`. Database row locks enforce correlation and allowed transitions. Duplicate, terminal, and out-of-order events are safe no-ops.
+5. A completed job exposes `resultReady=true`; a failed job exposes `failedStage` and a sanitized `errorMessage`.
 
-```bash
-docker compose up --build
-```
-
-The service runs behind the gateway:
+## Lifecycle and management
 
 ```text
-http://localhost:8080
+UPLOADED -> NORMALIZING -> BUILDING_RELATIONS -> SCORING -> COMPLETED
+                         \-------------------------------> FAILED
 ```
 
-Direct container port is not exposed in the root compose file. Use the gateway for local checks.
+`NORMALIZED` remains in the public status enum for backward compatibility. Receipt of `dataset.normalized` moves directly to `BUILDING_RELATIONS`, because relation processing starts from that event.
 
-### API Checks
-
-```bash
-curl http://localhost:8080/api/datasets/health
-```
-
-Expected:
-
-```json
-{"service":"upload-service","status":"UP"}
-```
-
-Upload the clean dataset:
-
-```bash
-curl -s -F "file=@data/clean_refund_dataset.csv" \
-  http://localhost:8080/api/datasets/upload
-```
-
-Upload the dirty/business-format dataset:
-
-```bash
-curl -s -F "file=@data/dirty_business_refund_dataset.csv" \
-  http://localhost:8080/api/datasets/upload
-```
-
-Expected upload response:
-
-```json
-{
-  "datasetId": "<uuid>",
-  "jobId": "<uuid>",
-  "filename": "clean_refund_dataset.csv",
-  "status": "UPLOADED"
-}
-```
-
-Preview:
-
-```bash
-curl -s http://localhost:8080/api/datasets/<datasetId>/preview
-```
-
-Expected preview response:
-
-```json
-{
-  "headers": ["order_id", "customer_id"],
-  "rows": [["order_1001", "customer_200"]]
-}
-```
-
-Start analysis:
-
-```bash
-curl -s -X POST http://localhost:8080/api/analysis/<datasetId>/start
-```
-
-Expected:
-
-```json
-{"jobId":"<uuid>"}
-```
-
-Status:
-
-```bash
-curl -s http://localhost:8080/api/analysis/<jobId>/status
-```
-
-Expected after start:
-
-```json
-{
-  "id": "<uuid>",
-  "jobId": "<uuid>",
-  "datasetId": "<uuid>",
-  "status": "NORMALIZING",
-  "currentStep": "NORMALIZING",
-  "message": "Normalizing CSV columns and refund records.",
-  "progressPercent": 20,
-  "stages": [
-    {
-      "status": "UPLOADED",
-      "message": "Dataset uploaded and ready to start analysis.",
-      "state": "completed"
-    },
-    {
-      "status": "NORMALIZING",
-      "message": "Normalizing CSV columns and refund records.",
-      "state": "current"
-    }
-  ]
-}
-```
-
-Update status manually during local demo:
-
-```bash
-curl -s -X PATCH http://localhost:8080/api/analysis/<jobId>/status \
-  -H "Content-Type: application/json" \
-  -d '{"status":"SCORING"}'
-```
-
-Supported statuses:
+Management endpoints:
 
 ```text
-UPLOADED
-NORMALIZING
-NORMALIZED
-BUILDING_RELATIONS
-SCORING
-COMPLETED
-FAILED
+GET  /api/datasets
+GET  /api/datasets/{datasetId}
+POST /api/analysis/{jobId}/retry
+POST /api/datasets/{datasetId}/archive
 ```
 
-### Flow Notes
+Retry is idempotent per source job, is allowed from `FAILED`/`COMPLETED`, and preserves earlier runs. Archive is a terminal-only soft delete: objects, jobs/results, and audit records are retained. Manual status PATCH is not registered unless `ADMIN_STATUS_PATCH_ENABLED=true`.
 
-`POST /api/datasets/upload` creates one `analysis_jobs` row in `UPLOADED`.
-
-`POST /api/analysis/{datasetId}/start` reuses that row, publishes one `dataset.uploaded` event with
-`datasetId`, `jobId`, `filename`, `filePath`, `fileType`, `uploadedAt`, and `timestamp`, then updates
-the job to `NORMALIZING`.
-Calling start again for the same dataset returns the existing job id instead of creating another job.
-
-Uploaded CSV validation checks `.csv` extension, empty files, required refund columns, duplicate or
-empty headers, inconsistent row length, required empty cells, numeric fields, and supported timestamp
-formats. Both the clean canonical dataset and the dirty business-column dataset are accepted.
-
-### Infrastructure Checks
-
-PostgreSQL:
+## Operational checks
 
 ```bash
-docker compose exec postgres psql -U postgres -d upload_db
+go test ./...
+go test -race ./...
+go vet ./...
+
+BASE_URL=http://localhost:8081 \
+RABBIT_API_URL=http://localhost:15672 \
+./scripts/smoke_gateway.sh
 ```
 
-Useful queries:
+The RabbitMQ consumer uses manual ack, persistent retry republishing, publisher confirms, a configured retry cap, and a durable DLQ. A lost consumer connection terminates the process cleanly so Compose can restart it and resume from the durable queue.
 
-```sql
-select id, name, status, created_at from datasets order by created_at desc limit 5;
-select dataset_id, file_path, file_type, uploaded_at from uploaded_files order by uploaded_at desc limit 5;
-select id, dataset_id, status, current_step, updated_at from analysis_jobs order by created_at desc limit 5;
-```
-
-RabbitMQ:
-
-```text
-http://localhost:15672
-login: guest
-password: guest
-```
-
-Open exchange `pipeline.exchange`; `dataset.uploaded` messages are published when analysis starts.
-
-MinIO:
-
-```text
-http://localhost:9001
-login: minioadmin
-password: minioadmin
-```
-
-Open bucket `datasets`; uploaded objects are stored under `datasets/<datasetId>.csv`.
+See [OpenAPI](docs/openapi.yaml) and [README](README.md) for the full contract and configuration.

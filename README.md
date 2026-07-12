@@ -110,6 +110,7 @@ flowchart LR
 
     MQ -->|"consume: refund.relations.built"| SCORE
     SCORE -->|"publish: refund.scoring.completed"| MQ
+    MQ -->|"consume: lifecycle + failure events"| STATUS
 ```
 
 Implemented in the current Compose MVP:
@@ -125,7 +126,7 @@ Implemented in the current Compose MVP:
   </tr>
   <tr>
     <td align="center"><b>Upload / Ingestion</b></td>
-    <td align="center">Go service for uploading e-commerce refund datasets, creating analysis jobs, showing file preview, and publishing processing events to RabbitMQ</td>
+    <td align="center">Go service for bounded CSV ingestion, dataset/history/retry APIs, automatic job orchestration and audit, MinIO/PostgreSQL consistency, and durable RabbitMQ event handling</td>
   </tr>
   <tr>
     <td align="center"><b>Graph / Relations</b></td>
@@ -366,9 +367,10 @@ The pipeline:
 7. Dedicated Graph DB storage is not connected yet.
 8. Scoring service consumes `refund.relations.built`.
 9. Scoring service calculates risk scores and publishes `refund.scoring.completed`.
-10. Frontend reads analysis status and results through REST API.
+10. Upload Service consumes correlated lifecycle/failure events and automatically updates status, progress, timestamps, result availability, and audit history.
+11. Frontend reads analysis status and results through REST API.
 
-Planned analysis statuses:
+Analysis statuses:
 
 * `UPLOADED`;
 * `NORMALIZING`;
@@ -463,12 +465,12 @@ Optional bonus functionality may include:
 
 <h2 align="center">Project Status</h2>
 
-The project is currently in the Week 5 feedback-driven refinement stage.
+The project is currently in the Week 6 reliability and lifecycle stage.
 
 The current MVP includes:
 
 * React / TypeScript frontend dashboard with dataset upload, preview, analysis progress, suspicious approvals table, and refund approval details view;
-* Go upload service with CSV upload, dataset records, analysis job creation, preview API, MinIO file storage, PostgreSQL persistence, and RabbitMQ event publishing;
+* Go upload service with bounded validation, dataset list/history/retry/archive APIs, atomic upload records, MinIO compensation, automatic event-driven job state, lifecycle audit, and RabbitMQ retry/DLQ handling;
 * Go relations service with REST endpoints for refund relations, customer history, support agent summary, relation features, and RabbitMQ consumption for normalized dataset events;
 * Kotlin / Spring Boot scoring service with suspicious refund approval detection, dataset-aware scoring endpoints, risk levels, explainable risk reasons, support agent risk summary, and RabbitMQ integration;
 * Nginx gateway routing backend API requests to upload, relations, and scoring services;
@@ -476,7 +478,7 @@ The current MVP includes:
 * RabbitMQ pipeline exchange `pipeline.exchange` with routing keys `dataset.uploaded`, `dataset.normalized`, `refund.relations.built`, `refund.scoring.completed`, and `pipeline.failed`; the separate normalization stage is still partial/planned;
 * demo refund datasets under `data/` for scoring, dashboard, and investigation flows.
 
-Week 5 refinement focused on compact documentation, clearer scoring explanations, consistent README wording, demo-ready return IDs, and validation evidence.
+Week 6 Upload Service work focused on reliable ingestion, idempotent start/retry, automatic state orchestration, operational history, and release evidence.
 
 Known limitations for the current MVP:
 

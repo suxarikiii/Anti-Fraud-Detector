@@ -17,12 +17,16 @@ const (
 )
 
 type Dataset struct {
-	ID               uuid.UUID `json:"id"`
-	Name             string    `json:"name"`
-	OriginalFilename string    `json:"originalFilename"`
-	FileType         string    `json:"fileType"`
-	Status           string    `json:"status"`
-	UploadedAt       time.Time `json:"uploadedAt"`
+	ID               uuid.UUID  `json:"id"`
+	Name             string     `json:"name"`
+	OriginalFilename string     `json:"originalFilename"`
+	FileType         string     `json:"fileType"`
+	Status           string     `json:"status"`
+	UploadedAt       time.Time  `json:"uploadedAt"`
+	ArchivedAt       *time.Time `json:"archivedAt,omitempty"`
+	SizeBytes        int64      `json:"sizeBytes"`
+	RowCount         int        `json:"rowCount"`
+	Warnings         []string   `json:"warnings"`
 }
 
 type UploadedFile struct {
@@ -34,13 +38,30 @@ type UploadedFile struct {
 }
 
 type AnalysisJob struct {
-	ID          uuid.UUID `json:"id"`
-	DatasetID   uuid.UUID `json:"datasetId"`
-	Status      string    `json:"status"`
-	CurrentStep string    `json:"currentStep"`
-	Error       string    `json:"errorMessage,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID           uuid.UUID  `json:"id"`
+	DatasetID    uuid.UUID  `json:"datasetId"`
+	Status       string     `json:"status"`
+	CurrentStep  string     `json:"currentStep"`
+	FailedStage  string     `json:"failedStage,omitempty"`
+	Error        string     `json:"errorMessage,omitempty"`
+	ResultReady  bool       `json:"resultReady"`
+	RetryOfJobID *uuid.UUID `json:"retryOfJobId,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	StartedAt    *time.Time `json:"startedAt,omitempty"`
+	CompletedAt  *time.Time `json:"completedAt,omitempty"`
+	FailedAt     *time.Time `json:"failedAt,omitempty"`
+}
+
+type AuditEvent struct {
+	ID         int64      `json:"id"`
+	DatasetID  uuid.UUID  `json:"datasetId"`
+	JobID      *uuid.UUID `json:"jobId,omitempty"`
+	EventType  string     `json:"eventType"`
+	FromStatus string     `json:"fromStatus,omitempty"`
+	ToStatus   string     `json:"toStatus,omitempty"`
+	Message    string     `json:"message,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
 }
 
 // Domain entities for refund detection (kept minimal for upload-service)

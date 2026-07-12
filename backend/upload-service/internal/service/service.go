@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"upload-service/internal/domain"
 	"upload-service/internal/repository"
@@ -24,8 +25,11 @@ import (
 )
 
 const (
-	datasetUploadedRoutingKey = "dataset.uploaded"
-	maxPreviewRows            = 20
+	datasetUploadedRoutingKey  = "dataset.uploaded"
+	maxPreviewRows             = 20
+	defaultMaxFileSize         = 50 << 20
+	defaultMaxRows             = 250_000
+	defaultMaxValidationErrors = 100
 )
 
 type PreviewResponse struct {
@@ -52,12 +56,20 @@ type AnalysisStatusResponse struct {
 	ProgressPercent int           `json:"progressPercent"`
 	Stages          []StatusStage `json:"stages"`
 	Error           string        `json:"errorMessage,omitempty"`
+	FailedStage     string        `json:"failedStage,omitempty"`
+	ResultReady     bool          `json:"resultReady"`
+	RetryOfJobID    string        `json:"retryOfJobId,omitempty"`
 	CreatedAt       time.Time     `json:"createdAt"`
 	UpdatedAt       time.Time     `json:"updatedAt"`
+	StartedAt       *time.Time    `json:"startedAt,omitempty"`
+	CompletedAt     *time.Time    `json:"completedAt,omitempty"`
+	FailedAt        *time.Time    `json:"failedAt,omitempty"`
 }
 
 type InvalidUploadError struct {
-	Message string
+	Message  string
+	Errors   []ValidationIssue
+	Warnings []ValidationIssue
 }
 
 func (e *InvalidUploadError) Error() string {
@@ -106,11 +118,18 @@ func (s *minioObjectStore) Get(ctx context.Context, objectName string) (io.ReadC
 	return s.client.GetObject(ctx, s.bucket, objectName, minio.GetObjectOptions{})
 }
 
+func (s *minioObjectStore) Delete(ctx context.Context, objectName string) error {
+	return s.client.RemoveObject(ctx, s.bucket, objectName, minio.RemoveObjectOptions{})
+}
+
 type Service struct {
-	repo      DatasetRepository
-	store     ObjectStore
-	publisher Publisher
-	logger    *slog.Logger
+	repo        DatasetRepository
+	store       ObjectStore
+	publisher   Publisher
+	logger      *slog.Logger
+	maxFileSize int64
+	maxRows     int
+	maxErrors   int
 }
 
 type datasetUploadedEvent struct {
@@ -128,40 +147,32 @@ func NewService(repo *repository.Repository, minioClient *minio.Client, bucket s
 }
 
 func NewServiceWithStore(repo DatasetRepository, store ObjectStore, publisher Publisher, logger *slog.Logger) *Service {
-	return &Service{repo: repo, store: store, publisher: publisher, logger: logger}
+	return &Service{
+		repo: repo, store: store, publisher: publisher, logger: logger,
+		maxFileSize: defaultMaxFileSize, maxRows: defaultMaxRows, maxErrors: defaultMaxValidationErrors,
+	}
 }
 
-func (s *Service) UploadDataset(ctx context.Context, file io.Reader, size int64, originalFilename string) (uuid.UUID, uuid.UUID, error) {
-	buffer, err := io.ReadAll(file)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, fmt.Errorf("read upload: %w", err)
+func (s *Service) ConfigureUploadLimits(maxFileSize int64, maxRows, maxErrors int) {
+	if maxFileSize > 0 {
+		s.maxFileSize = maxFileSize
 	}
-	if int64(len(buffer)) != size {
-		size = int64(len(buffer))
+	if maxRows > 0 {
+		s.maxRows = maxRows
 	}
+	if maxErrors > 0 {
+		s.maxErrors = maxErrors
+	}
+}
 
-	if err := validateUploadedCSV(originalFilename, buffer); err != nil {
+func (s *Service) MaxFileSize() int64 { return s.maxFileSize }
+
+func (s *Service) UploadDataset(ctx context.Context, file io.Reader, size int64, originalFilename string) (uuid.UUID, uuid.UUID, error) {
+	result, err := s.UploadDatasetDetailed(ctx, file, size, originalFilename, "text/csv")
+	if err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
-
-	datasetID := uuid.New()
-	objectName := fmt.Sprintf("datasets/%s.csv", datasetID.String())
-	if err := s.store.Put(ctx, objectName, bytes.NewReader(buffer), size, "text/csv"); err != nil {
-		return uuid.Nil, uuid.Nil, fmt.Errorf("upload to minio: %w", err)
-	}
-
-	now := time.Now().UTC()
-	if err := s.repo.CreateDatasetWithFile(ctx, datasetID, originalFilename, originalFilename, domain.AnalysisStatusUploaded, objectName, "csv", now, now); err != nil {
-		return uuid.Nil, uuid.Nil, fmt.Errorf("create dataset records: %w", err)
-	}
-
-	// create analysis job immediately after upload
-	jobID := uuid.New()
-	if err := s.repo.CreateAnalysisJob(ctx, jobID, datasetID, domain.AnalysisStatusUploaded, domain.AnalysisStatusUploaded, now, now); err != nil {
-		return uuid.Nil, uuid.Nil, fmt.Errorf("create analysis job: %w", err)
-	}
-
-	return datasetID, jobID, nil
+	return result.DatasetID, result.JobID, nil
 }
 
 func (s *Service) PreviewDataset(ctx context.Context, datasetID uuid.UUID) (*PreviewResponse, error) {
@@ -213,9 +224,33 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 	if job.Status != domain.AnalysisStatusUploaded {
 		return job.ID, nil
 	}
+	return s.startAnalysisJob(ctx, uploadedFile, job, now)
+}
+
+func (s *Service) startAnalysisJob(ctx context.Context, uploadedFile *domain.UploadedFile, job *domain.AnalysisJob, now time.Time) (uuid.UUID, error) {
+	if job.Status != domain.AnalysisStatusUploaded {
+		return job.ID, nil
+	}
+
+	claimed := true
+	var err error
+	if repo, ok := s.repo.(interface {
+		ClaimAnalysisStart(context.Context, uuid.UUID, time.Time) (bool, error)
+	}); ok {
+		claimed, err = repo.ClaimAnalysisStart(ctx, job.ID, now)
+		if errors.Is(err, repository.ErrDatasetArchived) {
+			return uuid.Nil, &InvalidUploadError{Message: repository.ErrDatasetArchived.Error()}
+		}
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("claim analysis start: %w", err)
+		}
+		if !claimed {
+			return job.ID, nil
+		}
+	}
 
 	event := datasetUploadedEvent{
-		DatasetID:  datasetID.String(),
+		DatasetID:  job.DatasetID.String(),
 		JobID:      job.ID.String(),
 		Filename:   filepath.Base(uploadedFile.FilePath),
 		FilePath:   uploadedFile.FilePath,
@@ -234,8 +269,12 @@ func (s *Service) StartAnalysis(ctx context.Context, datasetID uuid.UUID) (uuid.
 		return job.ID, fmt.Errorf("publish event: %w", err)
 	}
 
-	if err := s.repo.UpdateAnalysisStatus(ctx, job.ID, domain.AnalysisStatusNormalizing, domain.AnalysisStatusNormalizing, now); err != nil {
-		return uuid.Nil, fmt.Errorf("update analysis status: %w", err)
+	if _, supportsClaim := s.repo.(interface {
+		ClaimAnalysisStart(context.Context, uuid.UUID, time.Time) (bool, error)
+	}); !supportsClaim {
+		if err := s.repo.UpdateAnalysisStatus(ctx, job.ID, domain.AnalysisStatusNormalizing, domain.AnalysisStatusNormalizing, now); err != nil {
+			return uuid.Nil, fmt.Errorf("update analysis status: %w", err)
+		}
 	}
 
 	return job.ID, nil
@@ -295,6 +334,9 @@ func parseCSVPreview(reader io.Reader, limit int) (*PreviewResponse, error) {
 		return nil, fmt.Errorf("read csv header: %w", err)
 	}
 	headers = trimRecord(headers)
+	if len(headers) > 0 {
+		headers[0] = strings.TrimPrefix(headers[0], "\ufeff")
+	}
 
 	rawRows := make([][]string, 0, limit)
 	rows := make([]map[string]string, 0, limit)
@@ -389,29 +431,34 @@ func validateUploadedCSV(filename string, data []byte) error {
 
 func validateHeaders(headers []string) (map[string]int, error) {
 	if len(headers) == 0 {
-		return nil, &InvalidUploadError{Message: "uploaded CSV has no headers"}
+		return nil, invalidIssue("NO_HEADERS", "uploaded CSV has no headers")
 	}
 
 	seen := make(map[string]struct{}, len(headers))
+	semanticSeen := make(map[string]string)
 	columns := make(map[string]int)
 	for index, header := range headers {
 		normalized := normalizeHeader(header)
 		if normalized == "" {
-			return nil, &InvalidUploadError{Message: "uploaded CSV contains an empty header"}
+			return nil, invalidIssue("EMPTY_HEADER", "uploaded CSV contains an empty header")
 		}
 		if _, exists := seen[normalized]; exists {
-			return nil, &InvalidUploadError{Message: fmt.Sprintf("uploaded CSV contains duplicate header %q", header)}
+			return nil, invalidIssue("DUPLICATE_HEADER", fmt.Sprintf("uploaded CSV contains duplicate header %q", header))
 		}
 		seen[normalized] = struct{}{}
 
 		if semanticName, ok := headerAliases[normalized]; ok {
+			if previous, exists := semanticSeen[semanticName]; exists {
+				return nil, invalidIssue("DUPLICATE_SEMANTIC_HEADER", fmt.Sprintf("uploaded CSV columns %q and %q map to the same field %s", previous, header, semanticName))
+			}
+			semanticSeen[semanticName] = header
 			columns[semanticName] = index
 		}
 	}
 
 	for _, required := range requiredSemanticColumns {
 		if _, ok := columns[required]; !ok {
-			return nil, &InvalidUploadError{Message: fmt.Sprintf("uploaded CSV is missing required column %s", required)}
+			return nil, invalidIssue("MISSING_COLUMN", fmt.Sprintf("uploaded CSV is missing required column %s", required))
 		}
 	}
 
@@ -457,8 +504,13 @@ func validateTimestampField(record []string, columns map[string]int, rowNumber i
 func parseFlexibleFloat(value string) (float64, error) {
 	var cleaned strings.Builder
 	for _, r := range strings.TrimSpace(value) {
-		if (r >= '0' && r <= '9') || r == '.' || r == ',' || r == '-' {
+		switch {
+		case (r >= '0' && r <= '9') || r == '.' || r == ',' || r == '-' || r == '+':
 			cleaned.WriteRune(r)
+		case unicode.IsSpace(r), r == '$', r == '€', r == '₽', r == '£', r == '\'', r == '_':
+			// Accepted formatting/currency characters are removed before parsing.
+		default:
+			return 0, fmt.Errorf("unsupported character %q in number", r)
 		}
 	}
 
@@ -499,6 +551,7 @@ func recordToPreviewRow(headers, record []string) map[string]string {
 }
 
 func normalizeHeader(value string) string {
+	value = strings.TrimPrefix(value, "\ufeff")
 	value = strings.TrimSpace(strings.ToLower(value))
 	value = strings.ReplaceAll(value, "-", "_")
 	value = strings.ReplaceAll(value, " ", "_")
@@ -549,23 +602,36 @@ func buildAnalysisStatusResponse(job *domain.AnalysisJob) *AnalysisStatusRespons
 	}
 
 	message := statusMessage(status)
+	progress := statusProgress(status)
 	if status == domain.AnalysisStatusFailed && job.Error != "" {
 		message = job.Error
 	}
+	if status == domain.AnalysisStatusFailed {
+		progress = statusProgress(currentStep)
+	}
 
-	return &AnalysisStatusResponse{
+	response := &AnalysisStatusResponse{
 		ID:              job.ID.String(),
 		JobID:           job.ID.String(),
 		DatasetID:       job.DatasetID.String(),
 		Status:          status,
 		CurrentStep:     currentStep,
 		Message:         message,
-		ProgressPercent: statusProgress(status),
+		ProgressPercent: progress,
 		Stages:          buildStatusStages(status, currentStep),
 		Error:           job.Error,
+		FailedStage:     job.FailedStage,
+		ResultReady:     job.ResultReady || status == domain.AnalysisStatusCompleted,
 		CreatedAt:       job.CreatedAt,
 		UpdatedAt:       job.UpdatedAt,
+		StartedAt:       job.StartedAt,
+		CompletedAt:     job.CompletedAt,
+		FailedAt:        job.FailedAt,
 	}
+	if job.RetryOfJobID != nil {
+		response.RetryOfJobID = job.RetryOfJobID.String()
+	}
+	return response
 }
 
 func buildStatusStages(status, currentStep string) []StatusStage {
@@ -579,7 +645,7 @@ func buildStatusStages(status, currentStep string) []StatusStage {
 	for index, stageStatus := range orderedPipelineStatuses {
 		state := "pending"
 		switch {
-		case status == domain.AnalysisStatusFailed && stageStatus == currentStep:
+		case status == domain.AnalysisStatusFailed && (stageStatus == currentStep || (currentStep == domain.AnalysisStatusFailed && index == currentIndex)):
 			state = "failed"
 		case status == domain.AnalysisStatusCompleted || index < currentIndex:
 			state = "completed"
@@ -633,7 +699,7 @@ func statusProgress(status string) int {
 	case domain.AnalysisStatusCompleted:
 		return 100
 	case domain.AnalysisStatusFailed:
-		return 100
+		return 0
 	default:
 		return 0
 	}

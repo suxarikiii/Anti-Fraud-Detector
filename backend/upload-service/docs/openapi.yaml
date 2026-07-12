@@ -1,337 +1,314 @@
-openapi: 3.0.1
+openapi: 3.0.3
 info:
   title: Upload Service API
-  version: "1.0.0"
-  description: API for dataset upload, preview and analysis control
+  version: "2.0.0"
+  description: Reliable CSV ingestion and event-driven analysis lifecycle API.
 servers:
   - url: http://localhost:8081
+tags:
+  - name: datasets
+  - name: analysis
 paths:
   /api/datasets/health:
     get:
       summary: Health check
       responses:
-        '200':
-          description: service health
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  service:
-                    type: string
-
+        "200":
+          description: Service is running.
   /api/datasets/upload:
     post:
-      summary: Upload CSV dataset
+      tags: [datasets]
+      summary: Validate and upload a CSV dataset
+      description: The file is streamed through a bounded temporary spool, validated, stored in MinIO, and recorded atomically with its initial job.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
+              required: [file]
               properties:
                 file:
                   type: string
                   format: binary
       responses:
-        '201':
-          description: upload accepted
-          content:
-            application/json:
-              examples:
-                cleanUpload:
-                  value:
-                    datasetId: 8f79f612-770b-48fd-9d25-79d88d1e4211
-                    jobId: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
-                    filename: clean_refund_dataset.csv
-                    status: UPLOADED
-              schema:
-                type: object
-                properties:
-                  datasetId:
-                    type: string
-                  jobId:
-                    type: string
-                  filename:
-                    type: string
-                  status:
-                    type: string
-        '400':
-          description: invalid upload or CSV validation error
+        "201":
+          description: Dataset and initial job created.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
+                $ref: "#/components/schemas/UploadResponse"
+        "400":
+          description: Aggregated CSV validation errors.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: File exceeds the configured upload limit.
+  /api/datasets:
+    get:
+      tags: [datasets]
+      summary: List active datasets
+      parameters:
+        - {name: status, in: query, schema: {$ref: "#/components/schemas/AnalysisState"}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        "200":
+          description: Frontend-ready paginated dataset summaries. Archived datasets are excluded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetList"
+        "400": {description: Invalid status, date, or pagination filter.}
+  /api/datasets/{datasetId}:
+    get:
+      tags: [datasets]
+      summary: Get dataset metadata, complete run history, and lifecycle audit
+      parameters:
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetDetails"
+        "404": {description: Dataset not found.}
   /api/datasets/{datasetId}/preview:
     get:
-      summary: Preview uploaded dataset
+      tags: [datasets]
+      summary: Get a bounded CSV preview
       parameters:
-        - name: datasetId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/DatasetId"
       responses:
-        '200':
-          description: preview
-          content:
-            application/json:
-              examples:
-                cleanPreview:
-                  value:
-                    headers:
-                      - order_id
-                      - customer_id
-                      - return_id
-                    rows:
-                      - order_id: order_1001
-                        customer_id: customer_200
-                        return_id: return_3001
-                    rawRows:
-                      - ["order_1001", "customer_200", "return_3001"]
-                    rowCount: 1
-                    truncated: false
-                dirtyBusinessPreview:
-                  value:
-                    headers:
-                      - purchase_id
-                      - buyer_id
-                      - refund_request_id
-                    rows:
-                      - purchase_id: purchase_1001
-                        buyer_id: buyer_200
-                        refund_request_id: refund_req_3001
-                    rawRows:
-                      - ["purchase_1001", "buyer_200", "refund_req_3001"]
-                    rowCount: 1
-                    truncated: false
-              schema:
-                $ref: '#/components/schemas/PreviewResponse'
-        '404':
-          description: dataset was not found
+        "200":
+          description: At most 20 data rows.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
+                $ref: "#/components/schemas/PreviewResponse"
+        "404": {description: Dataset not found.}
+  /api/datasets/{datasetId}/archive:
+    post:
+      tags: [datasets]
+      summary: Soft-archive a dataset
+      description: Only terminal datasets can be archived. MinIO objects, jobs, results, and audit history are retained; archived datasets disappear from list and cannot be started or retried.
+      parameters:
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "204": {description: Dataset archived, or was already archived.}
+        "404": {description: Dataset not found.}
+        "409": {description: Dataset has an active job.}
   /api/analysis/{datasetId}/start:
     post:
-      summary: Start analysis for dataset
+      tags: [analysis]
+      summary: Idempotently start the latest uploaded job
+      description: Concurrent and repeated requests publish dataset.uploaded at most once for the job.
       parameters:
-        - name: datasetId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/DatasetId"
       responses:
-        '201':
-          description: job created
-          content:
-            application/json:
-              examples:
-                startAnalysis:
-                  value:
-                    jobId: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
-                    status: NORMALIZING
-              schema:
-                type: object
-                properties:
-                  jobId:
-                    type: string
-                  status:
-                    type: string
-                    enum: [UPLOADED, NORMALIZING, NORMALIZED, BUILDING_RELATIONS, SCORING, COMPLETED, FAILED]
-        '404':
-          description: dataset was not found
+        "201":
+          description: Start accepted, or the existing job returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '502':
-          description: analysis could not be started because pipeline event publishing failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
+                $ref: "#/components/schemas/JobReference"
+        "404": {description: Dataset not found.}
+        "409": {description: Dataset is archived.}
+        "502": {description: RabbitMQ publish failed and the job was marked FAILED.}
   /api/analysis/{jobId}/status:
     get:
-      summary: Get analysis job status
+      tags: [analysis]
+      summary: Get job status, progress, result availability, and failure details
       parameters:
-        - name: jobId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/JobId"
       responses:
-        '200':
-          description: job status
-          content:
-            application/json:
-              examples:
-                normalizing:
-                  value:
-                    id: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
-                    jobId: c8f7844b-f2fb-42a1-b45f-397d56f3ad2f
-                    datasetId: 8f79f612-770b-48fd-9d25-79d88d1e4211
-                    status: NORMALIZING
-                    currentStep: NORMALIZING
-                    message: Normalizing CSV columns and refund records.
-                    progressPercent: 20
-                    stages:
-                      - status: UPLOADED
-                        message: Dataset uploaded and ready to start analysis.
-                        state: completed
-                      - status: NORMALIZING
-                        message: Normalizing CSV columns and refund records.
-                        state: current
-                    createdAt: "2026-06-01T10:00:00Z"
-                    updatedAt: "2026-06-01T10:01:00Z"
-              schema:
-                $ref: '#/components/schemas/AnalysisStatus'
-        '404':
-          description: analysis job was not found
+        "200":
+          description: Analysis status.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
+                $ref: "#/components/schemas/AnalysisStatus"
+        "404": {description: Job not found.}
     patch:
-      summary: Update analysis job status for local demo/admin use
+      tags: [analysis]
+      summary: Admin-only manual status override
+      description: The route does not exist unless ADMIN_STATUS_PATCH_ENABLED=true. It is excluded from the release pipeline.
+      x-admin-only: true
       parameters:
-        - name: jobId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/JobId"
       requestBody:
         required: true
         content:
           application/json:
-            examples:
-              scoring:
-                value:
-                  status: SCORING
-              failed:
-                value:
-                  status: FAILED
-                  errorMessage: Failed to calculate refund risk scores
             schema:
               type: object
-              required:
-                - status
+              required: [status]
               properties:
-                status:
-                  type: string
-                  enum: [UPLOADED, NORMALIZING, NORMALIZED, BUILDING_RELATIONS, SCORING, COMPLETED, FAILED]
-                errorMessage:
-                  type: string
+                status: {$ref: "#/components/schemas/AnalysisState"}
+                errorMessage: {type: string}
       responses:
-        '200':
-          description: updated job status
+        "200":
+          description: Updated status.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/AnalysisStatus'
-        '400':
-          description: unsupported status or invalid body
+              schema: {$ref: "#/components/schemas/AnalysisStatus"}
+        "404": {description: Route disabled or job not found.}
+  /api/analysis/{jobId}/retry:
+    post:
+      tags: [analysis]
+      summary: Idempotently create and start a retry job
+      description: A retry creates a new job linked by retryOfJobId and preserves all previous runs and results. Only FAILED or COMPLETED jobs can be retried.
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "202":
+          description: Retry accepted; repeated calls for the same source return the same retry job.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: analysis job was not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
+              schema: {$ref: "#/components/schemas/JobReference"}
+        "404": {description: Source job not found.}
+        "409": {description: Retry not allowed or dataset archived.}
 components:
+  parameters:
+    DatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
   schemas:
+    AnalysisState:
+      type: string
+      enum: [UPLOADED, NORMALIZING, NORMALIZED, BUILDING_RELATIONS, SCORING, COMPLETED, FAILED]
+    ValidationIssue:
+      type: object
+      required: [code, message]
+      properties:
+        row: {type: integer}
+        column: {type: string}
+        code: {type: string}
+        message: {type: string}
+    UploadResponse:
+      type: object
+      required: [datasetId, jobId, filename, status, rowCount, sizeBytes]
+      properties:
+        datasetId: {type: string, format: uuid}
+        jobId: {type: string, format: uuid}
+        filename: {type: string}
+        status: {$ref: "#/components/schemas/AnalysisState"}
+        rowCount: {type: integer}
+        sizeBytes: {type: integer, format: int64}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/ValidationIssue"}
+    JobReference:
+      type: object
+      properties:
+        jobId: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/AnalysisState"}
     PreviewResponse:
       type: object
       properties:
-        headers:
-          type: array
-          items:
-            type: string
-        rows:
-          type: array
-          items:
-            type: object
-            additionalProperties:
-              type: string
-        rawRows:
-          type: array
-          description: Positional row values retained for compatibility and debugging.
-          items:
-            type: array
-            items:
-              type: string
-        rowCount:
-          type: integer
-        truncated:
-          type: boolean
-    AnalysisStatus:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        jobId:
-          type: string
-          format: uuid
-        datasetId:
-          type: string
-          format: uuid
-        status:
-          type: string
-          enum: [UPLOADED, NORMALIZING, NORMALIZED, BUILDING_RELATIONS, SCORING, COMPLETED, FAILED]
-        currentStep:
-          type: string
-        message:
-          type: string
-        progressPercent:
-          type: integer
-        stages:
-          type: array
-          items:
-            $ref: '#/components/schemas/StatusStage'
-        errorMessage:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
+        headers: {type: array, items: {type: string}}
+        rows: {type: array, items: {type: object, additionalProperties: {type: string}}}
+        rawRows: {type: array, items: {type: array, items: {type: string}}}
+        rowCount: {type: integer, maximum: 20}
+        truncated: {type: boolean}
     StatusStage:
       type: object
       properties:
-        status:
-          type: string
-        message:
-          type: string
-        state:
-          type: string
-          enum: [pending, current, completed, failed]
+        status: {$ref: "#/components/schemas/AnalysisState"}
+        message: {type: string}
+        state: {type: string, enum: [pending, current, completed, failed]}
+    AnalysisStatus:
+      type: object
+      required: [jobId, datasetId, status, progressPercent, resultReady, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        jobId: {type: string, format: uuid}
+        datasetId: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/AnalysisState"}
+        currentStep: {type: string}
+        message: {type: string}
+        progressPercent: {type: integer, minimum: 0, maximum: 100}
+        stages: {type: array, items: {$ref: "#/components/schemas/StatusStage"}}
+        resultReady: {type: boolean}
+        failedStage: {type: string}
+        errorMessage: {type: string}
+        retryOfJobId: {type: string, format: uuid}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time}
+        completedAt: {type: string, format: date-time}
+        failedAt: {type: string, format: date-time}
+    DatasetSummary:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        filename: {type: string}
+        status: {$ref: "#/components/schemas/AnalysisState"}
+        resultReady: {type: boolean}
+        latestJobId: {type: string, format: uuid}
+        rowCount: {type: integer}
+        sizeBytes: {type: integer, format: int64}
+        warningCount: {type: integer}
+        uploadedAt: {type: string, format: date-time}
+    DatasetList:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/DatasetSummary"}}
+        page: {type: integer}
+        pageSize: {type: integer}
+        total: {type: integer}
+        totalPages: {type: integer}
+    Dataset:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        originalFilename: {type: string}
+        fileType: {type: string}
+        status: {$ref: "#/components/schemas/AnalysisState"}
+        uploadedAt: {type: string, format: date-time}
+        archivedAt: {type: string, format: date-time}
+        sizeBytes: {type: integer, format: int64}
+        rowCount: {type: integer}
+        warnings: {type: array, items: {type: string}}
+    AuditEvent:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        datasetId: {type: string, format: uuid}
+        jobId: {type: string, format: uuid}
+        eventType: {type: string}
+        fromStatus: {type: string}
+        toStatus: {type: string}
+        message: {type: string}
+        createdAt: {type: string, format: date-time}
+    DatasetDetails:
+      type: object
+      properties:
+        dataset: {$ref: "#/components/schemas/Dataset"}
+        analysisHistory: {type: array, items: {$ref: "#/components/schemas/AnalysisStatus"}}
+        auditEvents: {type: array, items: {$ref: "#/components/schemas/AuditEvent"}}
     ErrorResponse:
       type: object
       properties:
-        status:
-          type: integer
-        error:
-          type: string
-        code:
-          type: string
-          example: INVALID_CSV
-        message:
-          type: string
-        path:
-          type: string
-        timestamp:
-          type: string
-          format: date-time
+        status: {type: integer}
+        error: {type: string}
+        code: {type: string}
+        message: {type: string}
+        path: {type: string}
+        timestamp: {type: string, format: date-time}
+        errors: {type: array, items: {$ref: "#/components/schemas/ValidationIssue"}}
+        warnings: {type: array, items: {$ref: "#/components/schemas/ValidationIssue"}}
