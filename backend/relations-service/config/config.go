@@ -33,8 +33,9 @@ type RabbitConfig struct {
 }
 
 type DataConfig struct {
-	DatasetID   string
-	DatasetPath string
+	DatasetID           string
+	DatasetPath         string
+	DemoFallbackEnabled bool
 }
 
 func Load() (*Config, error) {
@@ -56,8 +57,9 @@ func Load() (*Config, error) {
 			RelationsBuiltRoutingKey: getEnv("RABBITMQ_RELATIONS_BUILT_ROUTING_KEY", "refund.relations.built"),
 		},
 		Data: DataConfig{
-			DatasetID:   getEnv("RELATIONS_DATASET_ID", "demo"),
-			DatasetPath: getEnv("RELATIONS_DATASET_PATH", ""),
+			DatasetID:           getEnv("RELATIONS_DATASET_ID", "demo"),
+			DatasetPath:         getEnv("RELATIONS_DATASET_PATH", ""),
+			DemoFallbackEnabled: getBoolEnv("RELATIONS_DEMO_FALLBACK_ENABLED", true),
 		},
 	}, nil
 }

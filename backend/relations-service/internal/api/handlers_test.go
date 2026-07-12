@@ -77,6 +77,46 @@ func TestRebuildEndpointSmoke(t *testing.T) {
 	}
 }
 
+func TestGraphEndpointSmoke(t *testing.T) {
+	router := testRouter()
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/relations/datasets/demo/returns/return_3041/graph", nil)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	var payload domain.GraphProjectionResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(payload.Nodes) == 0 || len(payload.Edges) == 0 {
+		t.Fatalf("graph should include nodes and edges: %+v", payload)
+	}
+}
+
+func TestRankedAgentsEndpointSmoke(t *testing.T) {
+	router := testRouter()
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/relations/datasets/demo/agents/ranked?limit=1", nil)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	var payload domain.RankedAgentsResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(payload.Agents) != 1 {
+		t.Fatalf("agents length = %d, want 1", len(payload.Agents))
+	}
+}
+
 func testRouter() http.Handler {
 	records := []domain.NormalizedReturnRecord{
 		{
@@ -116,12 +156,23 @@ func testRouter() http.Handler {
 
 	router := mux.NewRouter()
 	router.HandleFunc("/api/relations/datasets/{datasetId}/rebuild", handler.RebuildDatasetHandler).Methods(http.MethodPost)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}", handler.DatasetReturnRelationsHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}/features", handler.DatasetReturnFeaturesHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}/related", handler.DatasetRelatedReturnsHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}/graph", handler.DatasetReturnGraphHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/customers/{customerId}/history", handler.DatasetCustomerHistoryHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/customers/{customerId}/summary", handler.DatasetCustomerSummaryHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/agents/{agentId}/summary", handler.DatasetAgentSummaryHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/agents/ranked", handler.DatasetRankedAgentsHandler).Methods(http.MethodGet)
 	return router
 }
 
 type noopPublisher struct{}
 
 func (noopPublisher) PublishRelationsBuilt(context.Context, service.RelationsBuiltEvent) error {
+	return nil
+}
+
+func (noopPublisher) PublishPipelineFailed(context.Context, service.PipelineFailedEvent) error {
 	return nil
 }

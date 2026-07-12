@@ -1,7 +1,10 @@
 {
   "returnId": "return_3041",
+  "datasetId": "demo",
   "customerId": "customer_999",
   "supportAgentId": "agent_999",
+  "featureVersion": 1780000000000000000,
+  "calculatedAt": "2026-06-28T16:27:46Z",
   "features": {
     "customerReturnCount": 5,
     "customerApprovedRefundCount": 5,
@@ -24,7 +27,7 @@
     ],
     "explanationSummary": "Customer refund history is the strongest relation signal.",
     "explanationSignals": [
-      "Customer has 5 refund requests in the demo dataset.",
+      "Customer has 5 refund requests.",
       "Support agent approval rate is 100%.",
       "Customer and support agent interacted on 5 return requests.",
       "Refund amount is 87% of the original order amount.",

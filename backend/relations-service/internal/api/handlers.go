@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"relations-service/internal/service"
 
@@ -39,6 +40,10 @@ func (h *Handler) RebuildDatasetHandler(w http.ResponseWriter, r *http.Request) 
 
 	rebuild, err := h.Service.RebuildDataset(r.Context(), datasetID)
 	if err != nil {
+		if errors.Is(err, service.ErrDatasetNotFound) {
+			writeError(w, http.StatusNotFound, "dataset %s not found", datasetID)
+			return
+		}
 		h.Logger.Error("rebuild relations error", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to rebuild relations: %v", err)
 		return
@@ -68,6 +73,24 @@ func (h *Handler) ReturnRelationsHandler(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, relations)
 }
 
+func (h *Handler) DatasetReturnRelationsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datasetID := vars["datasetId"]
+	returnID := vars["returnId"]
+	if datasetID == "" || returnID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id and return id are required")
+		return
+	}
+
+	relations, err := h.Service.GetReturnRelationsForDataset(datasetID, returnID)
+	if err != nil {
+		writeLookupError(w, err, "dataset %s or return %s not found", datasetID, returnID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, relations)
+}
+
 func (h *Handler) CustomerHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	customerID := mux.Vars(r)["customerId"]
 	if customerID == "" {
@@ -78,6 +101,42 @@ func (h *Handler) CustomerHistoryHandler(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, h.Service.GetCustomerHistory(customerID))
 }
 
+func (h *Handler) DatasetCustomerHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datasetID := vars["datasetId"]
+	customerID := vars["customerId"]
+	if datasetID == "" || customerID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id and customer id are required")
+		return
+	}
+
+	history, err := h.Service.GetCustomerHistoryForDataset(datasetID, customerID)
+	if err != nil {
+		writeLookupError(w, err, "dataset %s not found", datasetID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, history)
+}
+
+func (h *Handler) DatasetCustomerSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datasetID := vars["datasetId"]
+	customerID := vars["customerId"]
+	if datasetID == "" || customerID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id and customer id are required")
+		return
+	}
+
+	summary, err := h.Service.GetCustomerBehaviorSummary(datasetID, customerID, queryInt(r, "limit", 10))
+	if err != nil {
+		writeLookupError(w, err, "dataset %s not found", datasetID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, summary)
+}
+
 func (h *Handler) AgentSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	agentID := mux.Vars(r)["agentId"]
 	if agentID == "" {
@@ -86,6 +145,40 @@ func (h *Handler) AgentSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, h.Service.GetAgentSummary(agentID))
+}
+
+func (h *Handler) DatasetAgentSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datasetID := vars["datasetId"]
+	agentID := vars["agentId"]
+	if datasetID == "" || agentID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id and agent id are required")
+		return
+	}
+
+	summary, err := h.Service.GetAgentSummaryForDataset(datasetID, agentID)
+	if err != nil {
+		writeLookupError(w, err, "dataset %s not found", datasetID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, summary)
+}
+
+func (h *Handler) DatasetRankedAgentsHandler(w http.ResponseWriter, r *http.Request) {
+	datasetID := mux.Vars(r)["datasetId"]
+	if datasetID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id is required")
+		return
+	}
+
+	agents, err := h.Service.GetRankedAgents(datasetID, queryInt(r, "limit", 10), r.URL.Query().Get("sort"))
+	if err != nil {
+		writeLookupError(w, err, "dataset %s not found", datasetID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, agents)
 }
 
 func (h *Handler) ReturnFeaturesHandler(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +200,42 @@ func (h *Handler) ReturnFeaturesHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, features)
+}
+
+func (h *Handler) DatasetRelatedReturnsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datasetID := vars["datasetId"]
+	returnID := vars["returnId"]
+	if datasetID == "" || returnID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id and return id are required")
+		return
+	}
+
+	related, err := h.Service.GetRelatedReturns(datasetID, returnID, queryInt(r, "limit", 8))
+	if err != nil {
+		writeLookupError(w, err, "dataset %s or return %s not found", datasetID, returnID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, related)
+}
+
+func (h *Handler) DatasetReturnGraphHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datasetID := vars["datasetId"]
+	returnID := vars["returnId"]
+	if datasetID == "" || returnID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id and return id are required")
+		return
+	}
+
+	graph, err := h.Service.GetGraphProjection(datasetID, returnID, queryInt(r, "limit", 24))
+	if err != nil {
+		writeLookupError(w, err, "dataset %s or return %s not found", datasetID, returnID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, graph)
 }
 
 func (h *Handler) DatasetReturnFeaturesHandler(w http.ResponseWriter, r *http.Request) {
@@ -145,4 +274,24 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 func writeError(w http.ResponseWriter, status int, format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 	writeJSON(w, status, response{Message: message})
+}
+
+func writeLookupError(w http.ResponseWriter, err error, format string, args ...interface{}) {
+	if errors.Is(err, service.ErrDatasetNotFound) || errors.Is(err, service.ErrReturnNotFound) {
+		writeError(w, http.StatusNotFound, format, args...)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "relations service error: %v", err)
+}
+
+func queryInt(r *http.Request, key string, fallback int) int {
+	value := r.URL.Query().Get(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }

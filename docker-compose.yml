@@ -91,9 +91,12 @@ services:
       SERVER_PORT: ":8082"
       RELATIONS_DATASET_ID: demo
       RELATIONS_DATASET_PATH: /data/clean_refund_dataset.csv
+      RELATIONS_DEMO_FALLBACK_ENABLED: "false"
       RABBITMQ_ENABLED: "true"
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-pipeline.exchange}
+    volumes:
+      - ./data:/data:ro
     depends_on:
       rabbitmq:
         condition: service_healthy

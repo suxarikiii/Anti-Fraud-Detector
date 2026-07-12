@@ -93,6 +93,18 @@ func (c *Client) PublishRelationsBuilt(ctx context.Context, event service.Relati
 	})
 }
 
+func (c *Client) PublishPipelineFailed(ctx context.Context, event service.PipelineFailedEvent) error {
+	body, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal pipeline failed event: %w", err)
+	}
+
+	return c.ch.PublishWithContext(ctx, c.cfg.Exchange, "pipeline.failed", false, false, amqp091.Publishing{
+		ContentType: "application/json",
+		Body:        body,
+	})
+}
+
 func (c *Client) Close() {
 	if c.ch != nil {
 		_ = c.ch.Close()
