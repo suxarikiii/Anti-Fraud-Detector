@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"relations-service/internal/domain"
@@ -161,6 +164,125 @@ func TestCleanRefundDatasetHighRiskDemoCaseHasBusinessSignals(t *testing.T) {
 	}
 }
 
+func TestProcessNormalizedDatasetKeepsDatasetsIndependent(t *testing.T) {
+	publisher := &recordingPublisher{}
+	svc := NewService(nil, Options{})
+	firstPath := writeDatasetCSV(t, []csvRecord{
+		{returnID: "return_a", customerID: "customer_a", orderID: "order_a", agentID: "agent_a", category: "electronics", reason: "damaged", decision: approvedDecision, refund: "80", orderAmount: "100", manualOverride: "true", minutes: "5"},
+	})
+	secondPath := writeDatasetCSV(t, []csvRecord{
+		{returnID: "return_b", customerID: "customer_b", orderID: "order_b", agentID: "agent_b", category: "books", reason: "wrong_size", decision: approvedDecision, refund: "30", orderAmount: "60", manualOverride: "false", minutes: "8"},
+		{returnID: "return_c", customerID: "customer_b", orderID: "order_c", agentID: "agent_b", category: "books", reason: "wrong_size", decision: "REJECTED", refund: "0", orderAmount: "90", manualOverride: "false", minutes: "10"},
+	})
+	svc.publisher = publisher
+
+	if err := svc.ProcessNormalizedDataset(context.Background(), NormalizedDatasetEvent{DatasetID: "dataset_one", JobID: "job_one", RecordsPath: firstPath, RecordCount: 1, SchemaVersion: "refund-normalized.v1"}); err != nil {
+		t.Fatalf("ProcessNormalizedDataset first returned error: %v", err)
+	}
+	if err := svc.ProcessNormalizedDataset(context.Background(), NormalizedDatasetEvent{DatasetID: "dataset_two", JobID: "job_two", RecordsPath: secondPath, RecordCount: 2, SchemaVersion: "refund-normalized.v1"}); err != nil {
+		t.Fatalf("ProcessNormalizedDataset second returned error: %v", err)
+	}
+
+	first, err := svc.GetReturnFeaturesForDataset("dataset_one", "return_a")
+	if err != nil {
+		t.Fatalf("dataset_one features returned error: %v", err)
+	}
+	second, err := svc.GetReturnFeaturesForDataset("dataset_two", "return_b")
+	if err != nil {
+		t.Fatalf("dataset_two features returned error: %v", err)
+	}
+	if first.DatasetID != "dataset_one" || second.DatasetID != "dataset_two" {
+		t.Fatalf("features should keep dataset scope, got %s and %s", first.DatasetID, second.DatasetID)
+	}
+	if second.Features.AgentApprovalRate != 0.5 {
+		t.Fatalf("dataset_two approval rate = %.2f, want 0.50", second.Features.AgentApprovalRate)
+	}
+	if len(publisher.built) != 2 {
+		t.Fatalf("published relations built events = %d, want 2", len(publisher.built))
+	}
+}
+
+func TestProcessNormalizedDatasetReplacesOnlySelectedDataset(t *testing.T) {
+	svc := NewService(nil, Options{})
+	originalPath := writeDatasetCSV(t, []csvRecord{
+		{returnID: "return_a", customerID: "customer_a", orderID: "order_a", agentID: "agent_a", category: "electronics", reason: "damaged", decision: approvedDecision, refund: "80", orderAmount: "100", manualOverride: "true", minutes: "5"},
+	})
+	replacementPath := writeDatasetCSV(t, []csvRecord{
+		{returnID: "return_x", customerID: "customer_x", orderID: "order_x", agentID: "agent_x", category: "luxury", reason: "not_as_described", decision: approvedDecision, refund: "200", orderAmount: "250", manualOverride: "true", minutes: "4"},
+	})
+	otherPath := writeDatasetCSV(t, []csvRecord{
+		{returnID: "return_b", customerID: "customer_b", orderID: "order_b", agentID: "agent_b", category: "books", reason: "wrong_size", decision: approvedDecision, refund: "30", orderAmount: "60", manualOverride: "false", minutes: "8"},
+	})
+
+	_ = svc.ProcessNormalizedDataset(context.Background(), NormalizedDatasetEvent{DatasetID: "dataset_one", RecordsPath: originalPath})
+	_ = svc.ProcessNormalizedDataset(context.Background(), NormalizedDatasetEvent{DatasetID: "dataset_two", RecordsPath: otherPath})
+	_ = svc.ProcessNormalizedDataset(context.Background(), NormalizedDatasetEvent{DatasetID: "dataset_one", RecordsPath: replacementPath})
+
+	if _, err := svc.GetReturnFeaturesForDataset("dataset_one", "return_a"); !errors.Is(err, ErrReturnNotFound) {
+		t.Fatalf("old return lookup error = %v, want ErrReturnNotFound", err)
+	}
+	if _, err := svc.GetReturnFeaturesForDataset("dataset_one", "return_x"); err != nil {
+		t.Fatalf("replacement return lookup returned error: %v", err)
+	}
+	if _, err := svc.GetReturnFeaturesForDataset("dataset_two", "return_b"); err != nil {
+		t.Fatalf("unrelated dataset lookup returned error: %v", err)
+	}
+}
+
+func TestProcessNormalizedDatasetRejectsInvalidInputAndPublishesFailure(t *testing.T) {
+	publisher := &recordingPublisher{}
+	svc := NewService(publisher, Options{})
+	duplicatePath := writeDatasetCSV(t, []csvRecord{
+		{returnID: "return_dup", customerID: "customer_a", orderID: "order_a", agentID: "agent_a", category: "electronics", reason: "damaged", decision: approvedDecision, refund: "80", orderAmount: "100", manualOverride: "true", minutes: "5"},
+		{returnID: "return_dup", customerID: "customer_b", orderID: "order_b", agentID: "agent_b", category: "books", reason: "wrong_size", decision: approvedDecision, refund: "30", orderAmount: "60", manualOverride: "false", minutes: "8"},
+	})
+
+	err := svc.ProcessNormalizedDataset(context.Background(), NormalizedDatasetEvent{DatasetID: "dataset_invalid", JobID: "job_invalid", RecordsPath: duplicatePath})
+	if !errors.Is(err, ErrInvalidDataset) {
+		t.Fatalf("ProcessNormalizedDataset error = %v, want ErrInvalidDataset", err)
+	}
+	if len(publisher.failed) != 1 {
+		t.Fatalf("pipeline failed events = %d, want 1", len(publisher.failed))
+	}
+	if _, err := svc.GetReturnFeaturesForDataset("dataset_invalid", "return_dup"); !errors.Is(err, ErrDatasetNotFound) {
+		t.Fatalf("invalid dataset should not be stored, got error %v", err)
+	}
+}
+
+func TestGraphRelatedAndRankedAnalyticsAreDeterministic(t *testing.T) {
+	svc := NewServiceWithRecords(nil, featureTestRecords())
+
+	graph, err := svc.GetGraphProjection("demo", "return_a", 8)
+	if err != nil {
+		t.Fatalf("GetGraphProjection returned error: %v", err)
+	}
+	if len(graph.Nodes) == 0 || len(graph.Edges) == 0 {
+		t.Fatalf("graph should contain nodes and edges: %+v", graph)
+	}
+	if graph.Limit != 8 {
+		t.Fatalf("graph limit = %d, want 8", graph.Limit)
+	}
+
+	related, err := svc.GetRelatedReturns("demo", "return_a", 1)
+	if err != nil {
+		t.Fatalf("GetRelatedReturns returned error: %v", err)
+	}
+	if len(related.RelatedReturns) != 1 || !related.Truncated {
+		t.Fatalf("related returns = %+v, want one truncated result", related)
+	}
+	if related.RelatedReturns[0].ReturnID != "return_b" {
+		t.Fatalf("top related return = %s, want return_b", related.RelatedReturns[0].ReturnID)
+	}
+
+	ranked, err := svc.GetRankedAgents("demo", 2, "approvalRate")
+	if err != nil {
+		t.Fatalf("GetRankedAgents returned error: %v", err)
+	}
+	if len(ranked.Agents) == 0 || ranked.Agents[0].SupportAgentID != "agent_1" {
+		t.Fatalf("ranked agents = %+v, want agent_1 first", ranked.Agents)
+	}
+}
+
 func featureTestRecords() []domain.NormalizedReturnRecord {
 	return []domain.NormalizedReturnRecord{
 		{
@@ -216,6 +338,49 @@ func featureTestRecords() []domain.NormalizedReturnRecord {
 			OrderAmount:     120,
 		},
 	}
+}
+
+type recordingPublisher struct {
+	built  []RelationsBuiltEvent
+	failed []PipelineFailedEvent
+}
+
+func (p *recordingPublisher) PublishRelationsBuilt(_ context.Context, event RelationsBuiltEvent) error {
+	p.built = append(p.built, event)
+	return nil
+}
+
+func (p *recordingPublisher) PublishPipelineFailed(_ context.Context, event PipelineFailedEvent) error {
+	p.failed = append(p.failed, event)
+	return nil
+}
+
+type csvRecord struct {
+	returnID       string
+	customerID     string
+	orderID        string
+	agentID        string
+	category       string
+	reason         string
+	decision       string
+	refund         string
+	orderAmount    string
+	manualOverride string
+	minutes        string
+}
+
+func writeDatasetCSV(t *testing.T, records []csvRecord) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "normalized.csv")
+	content := "order_id,customer_id,return_id,support_agent_id,order_amount,refund_amount,product_category,return_reason,decision,manual_override,decision_time_minutes\n"
+	for _, record := range records {
+		content += record.orderID + "," + record.customerID + "," + record.returnID + "," + record.agentID + "," + record.orderAmount + "," + record.refund + "," + record.category + "," + record.reason + "," + record.decision + "," + record.manualOverride + "," + record.minutes + "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write test dataset: %v", err)
+	}
+	return path
 }
 
 func itoa(value int) string {

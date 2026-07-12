@@ -76,7 +76,14 @@ Common upload/status error codes: `INVALID_CSV`, `INVALID_DATASET_ID`, `INVALID_
 | `GET` | `/api/relations/health` | Relations service health. |
 | `GET` | `/api/relations/returns/{returnId}` | Return relation context. |
 | `GET` | `/api/relations/returns/{returnId}/features` | Demo relation features. |
+| `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}` | Dataset-scoped return relation context. |
 | `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}/features` | Dataset-scoped relation features. |
+| `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}/related?limit=8` | Related returns with relation reason and strength. |
+| `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}/graph?limit=24` | Bounded graph projection for investigation UI. |
+| `GET` | `/api/relations/datasets/{datasetId}/customers/{customerId}/history` | Dataset-scoped customer return history. |
+| `GET` | `/api/relations/datasets/{datasetId}/customers/{customerId}/summary?limit=10` | Customer behavior summary for analytics. |
+| `GET` | `/api/relations/datasets/{datasetId}/agents/{agentId}/summary` | Dataset-scoped support-agent summary. |
+| `GET` | `/api/relations/datasets/{datasetId}/agents/ranked?limit=10&sort=averageClusterSize` | Ranked risky agents for analyst views. |
 | `GET` | `/api/relations/customers/{customerId}/history` | Customer return history. |
 | `GET` | `/api/relations/agents/{agentId}/summary` | Support agent summary. |
 | `POST` | `/api/relations/datasets/{datasetId}/rebuild` | Rebuild relation features. |
@@ -86,8 +93,11 @@ Relation features response:
 ```json
 {
   "returnId": "return_3041",
+  "datasetId": "demo",
   "customerId": "customer_999",
   "supportAgentId": "agent_999",
+  "featureVersion": 1780000000000000000,
+  "calculatedAt": "2026-06-28T16:27:46Z",
   "features": {
     "customerReturnCount": 5,
     "customerApprovedRefundCount": 5,
@@ -113,6 +123,69 @@ Relation features response:
       "Related returns for investigation: return_3042, return_3043, return_3044, return_3045."
     ]
   }
+}
+```
+
+Related returns response:
+
+```json
+{
+  "datasetId": "demo",
+  "returnId": "return_3041",
+  "relatedReturns": [
+    {
+      "returnId": "return_3042",
+      "relationType": "CUSTOMER_AGENT_PAIR",
+      "reason": "Same customer and support agent pair.",
+      "strength": 1,
+      "customerId": "customer_999",
+      "supportAgentId": "agent_999"
+    }
+  ],
+  "limit": 8,
+  "truncated": false
+}
+```
+
+Graph projection response:
+
+```json
+{
+  "datasetId": "demo",
+  "returnId": "return_3041",
+  "nodes": [
+    { "id": "return:return_3041", "type": "return", "label": "return_3041", "summary": "Selected return request" },
+    { "id": "customer:customer_999", "type": "customer", "label": "customer_999", "summary": "Customer who requested the refund" }
+  ],
+  "edges": [
+    {
+      "from": "customer:customer_999",
+      "to": "order:order_1041",
+      "type": "PLACED_ORDER",
+      "label": "placed order",
+      "count": 1,
+      "weight": 1,
+      "reason": "Customer placed the original order."
+    }
+  ],
+  "limit": 24,
+  "truncated": false
+}
+```
+
+Rebuild response:
+
+```json
+{
+  "datasetId": "demo",
+  "jobId": "relations-job-demo",
+  "status": "RELATIONS_REBUILD_COMPLETED",
+  "relationsCount": 315,
+  "featuresCount": 45,
+  "recordsCount": 45,
+  "schemaVersion": "refund-normalized.v1",
+  "featureVersion": 1780000000000000000,
+  "calculatedAt": "2026-06-28T16:27:46Z"
 }
 ```
 

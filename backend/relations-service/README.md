@@ -8,17 +8,20 @@
 
 <h2 align="center">Current Status</h2>
 
-The current MVP stabilizes the relation feature contract for Scoring Service and frontend integration.
+The current MVP stabilizes the relation feature contract for Scoring Service and frontend integration, and now keeps relation features scoped by uploaded dataset.
 
 What works now:
 
 * service runs locally and in root `docker-compose.yml`;
 * health endpoint is available on `:8082`;
-* `/api/relations/returns/{returnId}/features` calculates features from normalized refund records;
-* `/api/relations/datasets/{datasetId}/returns/{returnId}/features` provides a dataset-aware feature endpoint;
+* `/api/relations/returns/{returnId}/features` calculates demo-compatible features from normalized refund records;
+* `/api/relations/datasets/{datasetId}/returns/{returnId}/features` returns cached dataset-scoped features by `datasetId + returnId`;
+* dataset-aware customer history, customer summary, support-agent summary, ranked-agent, related-return, and graph projection endpoints are available;
 * return IDs from `data/clean_refund_dataset.csv` are supported for the local demo dataset;
-* RabbitMQ consumer stub listens for `dataset.normalized` when `RABBITMQ_ENABLED=true`;
-* rebuild flow publishes `refund.relations.built` with `datasetId`, `jobId`, `relationsCount`, and `featuresCount`;
+* RabbitMQ consumer listens for `dataset.normalized` when `RABBITMQ_ENABLED=true`;
+* normalized dataset artifacts are loaded from `recordsPath` (`file://...` or local path), validated, and atomically stored per dataset;
+* rebuild and ingestion publish `refund.relations.built` with dataset, record, relation, feature, schema, and version metadata;
+* failed ingestion publishes `pipeline.failed` with stage and error context;
 * dedicated Graph DB storage is not connected and remains future/optional MVP work.
 
 ---
@@ -40,7 +43,7 @@ refund.scoring.completed
 
 <h2 align="center">Normalized Input Contract</h2>
 
-Relations Service expects normalized refund records. In the current demo, normalization is represented by prepared clean/dirty datasets, mapping documentation, and validation artifacts; a separate ML / Normalization Service is planned but not part of the current root Compose stack.
+Relations Service expects normalized refund records. In Compose it loads the prepared demo CSV from `/data/clean_refund_dataset.csv`. In the pipeline it consumes `dataset.normalized` and loads the normalized artifact referenced by `recordsPath`.
 
 Canonical record shape:
 
@@ -75,6 +78,14 @@ Required fields for feature generation:
 * `orderAmount: number`
 * `manualOverride: boolean`
 * `decisionTimeMinutes: integer`
+
+The CSV artifact must contain these columns:
+
+```text
+order_id,customer_id,return_id,support_agent_id,order_amount,refund_amount,product_category,return_reason,decision,manual_override,decision_time_minutes
+```
+
+Validation rejects empty datasets, missing required columns, duplicate `return_id` values, mismatched dataset IDs, and record-count mismatches when `recordCount` is provided by the event. A failed dataset is not stored.
 
 ---
 
@@ -111,8 +122,11 @@ Example:
 ```json
 {
   "returnId": "return_3041",
+  "datasetId": "demo",
   "customerId": "customer_999",
   "supportAgentId": "agent_999",
+  "featureVersion": 1780000000000000000,
+  "calculatedAt": "2026-06-28T16:27:46Z",
   "features": {
     "customerReturnCount": 5,
     "customerApprovedRefundCount": 5,
@@ -162,6 +176,9 @@ Run locally without RabbitMQ:
 
 ```bash
 cd backend/relations-service
+RELATIONS_DATASET_ID=demo \
+RELATIONS_DATASET_PATH=../../data/clean_refund_dataset.csv \
+RELATIONS_DEMO_FALLBACK_ENABLED=false \
 go run cmd/main.go
 ```
 
@@ -176,6 +193,9 @@ RABBITMQ_EXCHANGE=pipeline.exchange \
 RABBITMQ_NORMALIZED_QUEUE=relations.dataset-normalized.queue \
 RABBITMQ_NORMALIZED_ROUTING_KEY=dataset.normalized \
 RABBITMQ_RELATIONS_BUILT_ROUTING_KEY=refund.relations.built \
+RELATIONS_DATASET_ID=demo \
+RELATIONS_DATASET_PATH=../../data/clean_refund_dataset.csv \
+RELATIONS_DEMO_FALLBACK_ENABLED=false \
 go run cmd/main.go
 ```
 
@@ -206,6 +226,14 @@ Endpoints:
 ```text
 GET  /api/relations/health
 POST /api/relations/datasets/{datasetId}/rebuild
+GET  /api/relations/datasets/{datasetId}/returns/{returnId}
+GET  /api/relations/datasets/{datasetId}/returns/{returnId}/features
+GET  /api/relations/datasets/{datasetId}/returns/{returnId}/related?limit=8
+GET  /api/relations/datasets/{datasetId}/returns/{returnId}/graph?limit=24
+GET  /api/relations/datasets/{datasetId}/customers/{customerId}/history
+GET  /api/relations/datasets/{datasetId}/customers/{customerId}/summary?limit=10
+GET  /api/relations/datasets/{datasetId}/agents/{agentId}/summary
+GET  /api/relations/datasets/{datasetId}/agents/ranked?limit=10&sort=averageClusterSize
 GET  /api/relations/returns/{returnId}
 GET  /api/relations/customers/{customerId}/history
 GET  /api/relations/agents/{agentId}/summary
@@ -218,6 +246,10 @@ Week 4 smoke demo:
 curl http://localhost:8082/api/relations/health
 curl http://localhost:8082/api/relations/returns/return_3041/features
 curl http://localhost:8082/api/relations/datasets/demo/returns/return_3041/features
+curl http://localhost:8082/api/relations/datasets/demo/returns/return_3041/related
+curl http://localhost:8082/api/relations/datasets/demo/returns/return_3041/graph
+curl http://localhost:8082/api/relations/datasets/demo/customers/customer_999/summary
+curl http://localhost:8082/api/relations/datasets/demo/agents/ranked?limit=5
 curl http://localhost:8082/api/relations/returns/return_3006/features
 curl -X POST http://localhost:8082/api/relations/datasets/demo/rebuild
 ```
@@ -265,6 +297,9 @@ RABBITMQ_EXCHANGE=pipeline.exchange
 RABBITMQ_NORMALIZED_QUEUE=relations.dataset-normalized.queue
 RABBITMQ_NORMALIZED_ROUTING_KEY=dataset.normalized
 RABBITMQ_RELATIONS_BUILT_ROUTING_KEY=refund.relations.built
+RELATIONS_DATASET_ID=demo
+RELATIONS_DATASET_PATH=../../data/clean_refund_dataset.csv
+RELATIONS_DEMO_FALLBACK_ENABLED=false
 ```
 
 Input event:
@@ -273,7 +308,9 @@ Input event:
 {
   "datasetId": "demo",
   "jobId": "job_123",
-  "recordsPath": "normalized/demo.json",
+  "recordsPath": "file:///data/clean_refund_dataset.csv",
+  "recordCount": 45,
+  "schemaVersion": "refund-normalized.v1",
   "publishedAt": "2026-06-22T10:00:00Z"
 }
 ```
@@ -284,9 +321,25 @@ Output event:
 {
   "datasetId": "demo",
   "jobId": "job_123",
+  "recordsPath": "file:///data/clean_refund_dataset.csv",
+  "recordsCount": 45,
   "relationsCount": 315,
   "featuresCount": 45,
+  "schemaVersion": "refund-normalized.v1",
+  "featureVersion": 1780000000000000000,
   "publishedAt": "2026-06-22T10:00:05Z"
+}
+```
+
+Failure event:
+
+```json
+{
+  "datasetId": "demo",
+  "jobId": "job_123",
+  "stage": "RELATIONS",
+  "message": "invalid normalized dataset: duplicate returnId return_3041 in dataset demo",
+  "failedAt": "2026-06-22T10:00:05Z"
 }
 ```
 
