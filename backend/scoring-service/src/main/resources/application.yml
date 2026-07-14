@@ -4,6 +4,14 @@ server:
 spring:
   application:
     name: scoring-service
+  datasource:
+    url: ${SCORING_DB_URL:jdbc:postgresql://localhost:5432/upload_db}
+    username: ${SCORING_DB_USER:postgres}
+    password: ${SCORING_DB_PASSWORD:postgres}
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
   rabbitmq:
     listener:
       simple:
@@ -14,3 +22,9 @@ management:
     web:
       exposure:
         include: health, info
+
+app:
+  relations:
+    base-url: ${RELATIONS_BASE_URL:http://localhost:8082}
+  scoring:
+    demo-enabled: ${SCORING_DEMO_ENABLED:false}

@@ -24,5 +24,7 @@ data class RefundApprovalDetailsResponse(
     val topReason: String,
     val reasons: List<RiskReason>,
     val relationFeatures: RefundApprovalFeatures,
+    val featureSource: String,
+    val calculationVersion: Long,
     val calculatedAt: Instant
 )

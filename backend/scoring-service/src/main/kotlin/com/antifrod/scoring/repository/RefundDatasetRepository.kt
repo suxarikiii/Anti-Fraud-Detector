@@ -1,12 +1,10 @@
 package com.antifrod.scoring.repository
 
 import com.antifrod.scoring.model.RefundApprovalRecord
-import org.springframework.stereotype.Repository
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
-@Repository
 class RefundDatasetRepository {
 
     fun findAll(): List<RefundApprovalRecord> {
@@ -22,15 +20,11 @@ class RefundDatasetRepository {
     }
 
     fun findByDatasetId(datasetId: String): List<RefundApprovalRecord> {
-        if (!isSupportedDatasetId(datasetId)) {
+        if (datasetId != "demo") {
             return emptyList()
         }
 
         return findAll()
-    }
-
-    private fun isSupportedDatasetId(datasetId: String): Boolean {
-        return datasetId == "demo" || UUID_REGEX.matches(datasetId)
     }
 
     private fun parseLine(line: String): RefundApprovalRecord {
@@ -76,9 +70,4 @@ class RefundDatasetRepository {
                     { it.toString() }}")
     }
 
-    private companion object {
-        val UUID_REGEX = Regex(
-            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-        )
-    }
 }

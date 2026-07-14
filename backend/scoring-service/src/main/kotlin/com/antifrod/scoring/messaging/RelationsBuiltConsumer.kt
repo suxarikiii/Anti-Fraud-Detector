@@ -18,13 +18,13 @@ class RelationsBuiltConsumer(
     @RabbitListener(queues = [RabbitMqConfig.REFUND_RELATIONS_BUILT_QUEUE])
     fun handleRelationsBuilt(event: RelationsBuiltEvent) {
         try {
-            val result = scoringService.processRelationsBuilt(event.datasetId)
+            val result = scoringService.processRelationsBuilt(event)
 
             scoringEventPublisher.publishScoringCompleted(
                 ScoringCompletedEvent(
                     datasetId = event.datasetId,
                     jobId = event.jobId,
-                    scoredApprovalsCount = result.suspiciousApprovalsCount,
+                    scoredApprovalsCount = result.scoredApprovalsCount,
                     suspiciousApprovalsCount = result.suspiciousApprovalsCount,
                     timestamp = Instant.now()
                 )
@@ -35,6 +35,8 @@ class RelationsBuiltConsumer(
                     datasetId = event.datasetId,
                     jobId = event.jobId,
                     failedStep = "SCORING",
+                    errorCode = (exception as? com.antifrod.scoring.service.ScoringDependencyException)?.errorCode
+                        ?: "SCORING_FAILED",
                     errorMessage = exception.message ?: "Unknown scoring error",
                     timestamp = Instant.now()
                 )

@@ -13,5 +13,7 @@ data class SuspiciousRefundApproval(
     val riskLevel: RiskLevel,
     val topReason: String,
     val reasons: List<RiskReason>,
+    val featureSource: String,
+    val calculationVersion: Long,
     val calculatedAt: java.time.Instant
 )

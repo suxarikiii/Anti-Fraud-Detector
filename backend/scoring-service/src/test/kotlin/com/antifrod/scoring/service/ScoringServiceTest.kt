@@ -1,21 +1,22 @@
 package com.antifrod.scoring.service
 
 import com.antifrod.scoring.model.RiskLevel
-import com.antifrod.scoring.repository.RefundDatasetRepository
+import com.antifrod.scoring.messaging.event.RelationsBuiltEvent
+import com.antifrod.scoring.model.InvestigationAction
+import com.antifrod.scoring.model.InvestigationDecisionRequest
+import com.antifrod.scoring.model.InvestigationOutcome
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.beans.factory.annotation.Autowired
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
-class ScoringServiceTest {
-
-    private val riskRuleEngine = RiskRuleEngine(ExplanationBuilder())
-
-    private val scoringService = ScoringService(
-        refundDatasetRepository = RefundDatasetRepository(),
-        featureProvider = CsvDerivedFeatureProvider(),
-        riskRuleEngine = riskRuleEngine
-    )
+@SpringBootTest
+class ScoringServiceTest @Autowired constructor(
+    private val scoringService: ScoringService
+) {
 
     @Test
     fun `should return suspicious approvals from CSV dataset`() {
@@ -118,8 +119,8 @@ class ScoringServiceTest {
         val response = scoringService.recalculateDataset("demo")
 
         assertEquals("demo", response.datasetId)
-        assertTrue(response.status.contains("RECALCULATION_STARTED"))
-        assertTrue(response.status.contains("SUSPICIOUS_APPROVALS"))
+        assertTrue(response.status.contains("RECALCULATED"))
+        assertTrue(response.status.contains("VERSION"))
     }
 
     @Test
@@ -159,18 +160,75 @@ class ScoringServiceTest {
         assertEquals(RiskLevel.CRITICAL, details.riskLevel)
         assertEquals(100, details.riskScore)
         assertTrue(details.reasons.isNotEmpty())
-        assertEquals("CSV_DERIVED_FALLBACK", details.relationFeatures.featureSource)
+        assertEquals("DEMO_CSV", details.relationFeatures.featureSource)
         assertTrue(details.relationFeatures.customerReturnCount >= 5)
     }
 
     @Test
-    fun `should support uploaded UUID datasets through CSV fallback`() {
-        val details = scoringService.getReturnDetails(
-            "123e4567-e89b-12d3-a456-426614174000",
-            "return_3041"
-        )
+    fun `unknown UUID dataset never receives demo records`() {
+        kotlin.test.assertFailsWith<ScoringDependencyException> {
+            scoringService.getReturnDetails("123e4567-e89b-12d3-a456-426614174000", "return_3041")
+        }
+    }
 
-        assertEquals("123e4567-e89b-12d3-a456-426614174000", details.datasetId)
-        assertEquals("return_3041", details.returnId)
+    @Test
+    fun `duplicate relations event is idempotent`() {
+        val event = RelationsBuiltEvent(datasetId = "demo", jobId = "idempotency-test-job")
+        val first = scoringService.processRelationsBuilt(event)
+        val second = scoringService.processRelationsBuilt(event)
+
+        assertFalse(first.duplicate)
+        assertTrue(second.duplicate)
+        assertEquals(first.scoredApprovalsCount, second.scoredApprovalsCount)
+        assertEquals(first.suspiciousApprovalsCount, second.suspiciousApprovalsCount)
+    }
+
+    @Test
+    fun `recalculation increments persisted calculation version`() {
+        val before = scoringService.getReturnRisk("demo", "return_3002").calculationVersion
+        scoringService.recalculateDataset("demo")
+        val after = scoringService.getReturnRisk("demo", "return_3002").calculationVersion
+
+        assertTrue(after > before)
+    }
+
+    @Test
+    fun `decision survives recalculation and CSV export escapes UTF-8 note`() {
+        val request = InvestigationDecisionRequest(
+            action = InvestigationAction.ESCALATE,
+            outcome = InvestigationOutcome.NEEDS_MORE_INFO,
+            note = "Проверить чек, \"важно\"",
+            analystId = "analyst-1"
+        )
+        scoringService.saveDecision("demo", "return_3003", request)
+        scoringService.recalculateDataset("demo")
+
+        val stored = scoringService.getDecision("demo", "return_3003")
+        val export = scoringService.exportCsv("demo", outcome = InvestigationOutcome.NEEDS_MORE_INFO)
+        assertEquals(request.note, stored.note)
+        assertTrue(export.startsWith("\uFEFF"))
+        assertTrue(export.contains("Проверить чек, \"\"важно\"\""))
+        assertTrue(export.contains("return_3003"))
+    }
+
+    @Test
+    fun `terminal analyst outcome rejects invalid transition`() {
+        scoringService.saveDecision(
+            "demo", "return_3004",
+            InvestigationDecisionRequest(InvestigationAction.REVIEW, InvestigationOutcome.CONFIRMED_FRAUD)
+        )
+        kotlin.test.assertFailsWith<ScoringValidationException> {
+            scoringService.saveDecision(
+                "demo", "return_3004",
+                InvestigationDecisionRequest(InvestigationAction.REVIEW, InvestigationOutcome.OPEN)
+            )
+        }
+    }
+
+    @Test
+    fun `empty filtered export still returns a valid header`() {
+        val export = scoringService.exportCsv("demo", agent = "agent-does-not-exist")
+        assertTrue(export.startsWith("\uFEFF\"datasetId\""))
+        assertEquals(2, export.split("\r\n").size)
     }
 }
