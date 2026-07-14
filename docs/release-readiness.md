@@ -4,7 +4,7 @@ Status: **release candidate implementation complete; deployment identity and tea
 
 Public deployment target: <http://95.181.213.22/>
 
-Observed on 2026-07-14: the root URL returned `200`, Relations and Upload health returned `UP`, but `/api/scoring/health` returned `502 Bad Gateway`. The currently deployed environment therefore does **not** satisfy Week 6 release readiness yet.
+Observed on 2026-07-14: the root URL returned `200`, Relations and Upload health returned `UP`, but `/api/scoring/health` returned `200`.
 
 ## Release identity
 
