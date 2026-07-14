@@ -119,13 +119,20 @@ services:
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-guest}
       SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-guest}
+      SCORING_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-upload_db}
+      SCORING_DB_USER: ${POSTGRES_USER:-postgres}
+      SCORING_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RELATIONS_BASE_URL: ${RELATIONS_BASE_URL:-http://relations-service:8082}
+      SCORING_DEMO_ENABLED: ${SCORING_DEMO_ENABLED:-false}
     ports:
       - "8083:8083"
-    volumes:
-      - ./data:/data:ro
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      relations-service:
+        condition: service_started
     restart: unless-stopped
 
   # ── Gateway ───────────────────────────────────────────
