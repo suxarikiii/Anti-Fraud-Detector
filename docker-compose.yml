@@ -67,11 +67,18 @@ services:
       DB_NAME: ${POSTGRES_DB:-upload_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-pipeline.exchange}
+      RABBITMQ_UPLOAD_EVENTS_QUEUE: ${RABBITMQ_UPLOAD_EVENTS_QUEUE:-upload.pipeline-events.queue}
+      RABBITMQ_UPLOAD_DLQ: ${RABBITMQ_UPLOAD_DLQ:-upload.pipeline-events.dlq}
+      RABBITMQ_MAX_RETRIES: ${RABBITMQ_MAX_RETRIES:-3}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: datasets
       MINIO_SECURE: "false"
+      UPLOAD_MAX_FILE_SIZE_BYTES: ${UPLOAD_MAX_FILE_SIZE_BYTES:-52428800}
+      UPLOAD_MAX_ROWS: ${UPLOAD_MAX_ROWS:-250000}
+      UPLOAD_MAX_VALIDATION_ERRORS: ${UPLOAD_MAX_VALIDATION_ERRORS:-100}
+      ADMIN_STATUS_PATCH_ENABLED: "false"
     depends_on:
       postgres:
         condition: service_healthy

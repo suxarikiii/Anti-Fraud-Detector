@@ -27,6 +27,7 @@ type Container struct {
 	DB              *sql.DB
 	MinioClient     *minio.Client
 	RabbitPublisher *rabbitmq.Publisher
+	RabbitConsumer  *rabbitmq.Consumer
 	Repository      *repository.Repository
 	Service         *service.Service
 	Handler         *api.Handler
@@ -76,9 +77,27 @@ func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
 		return nil, fmt.Errorf("rabbitmq publisher: %w", err)
 	}
 
+	var rabbitConsumer *rabbitmq.Consumer
+	routingKeys := []string{
+		service.DatasetNormalizedRoutingKey,
+		service.RelationsBuiltRoutingKey,
+		service.ScoringCompletedRoutingKey,
+		service.PipelineFailedRoutingKey,
+	}
+
 	repo := repository.NewRepository(db)
-	service := service.NewService(repo, minioClient, cfg.MinIO.Bucket, rabbitPublisher, logger)
-	handler := api.NewHandler(service, logger)
+	uploadService := service.NewService(repo, minioClient, cfg.MinIO.Bucket, rabbitPublisher, logger)
+	uploadService.ConfigureUploadLimits(cfg.Upload.MaxFileSize, cfg.Upload.MaxRows, cfg.Upload.MaxErrors)
+	if err := retryDependency(logger, "rabbitmq lifecycle consumer", func() error {
+		var consumerErr error
+		rabbitConsumer, consumerErr = rabbitmq.NewConsumer(cfg.Rabbit, routingKeys, uploadService.HandlePipelineEvent, logger)
+		return consumerErr
+	}); err != nil {
+		rabbitPublisher.Close()
+		_ = db.Close()
+		return nil, fmt.Errorf("rabbitmq lifecycle consumer: %w", err)
+	}
+	handler := api.NewHandler(uploadService, logger)
 
 	return &Container{
 		Logger:          logger,
@@ -86,8 +105,9 @@ func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
 		DB:              db,
 		MinioClient:     minioClient,
 		RabbitPublisher: rabbitPublisher,
+		RabbitConsumer:  rabbitConsumer,
 		Repository:      repo,
-		Service:         service,
+		Service:         uploadService,
 		Handler:         handler,
 	}, nil
 }
@@ -126,10 +146,16 @@ func (c *Container) Router() http.Handler {
 	router := mux.NewRouter()
 	router.HandleFunc("/api/datasets/health", c.Handler.HealthHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/datasets/upload", c.Handler.UploadHandler).Methods(http.MethodPost)
+	router.HandleFunc("/api/datasets", c.Handler.ListDatasetsHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/datasets/{datasetId}/preview", c.Handler.PreviewHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/datasets/{datasetId}", c.Handler.DatasetDetailsHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/datasets/{datasetId}/archive", c.Handler.ArchiveDatasetHandler).Methods(http.MethodPost)
 	router.HandleFunc("/api/analysis/{datasetId}/start", c.Handler.StartAnalysisHandler).Methods(http.MethodPost)
 	router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.StatusHandler).Methods(http.MethodGet)
-	router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.UpdateStatusHandler).Methods(http.MethodPatch)
+	router.HandleFunc("/api/analysis/{jobId}/retry", c.Handler.RetryAnalysisHandler).Methods(http.MethodPost)
+	if c.Config.Admin.StatusPatchEnabled {
+		router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.UpdateStatusHandler).Methods(http.MethodPatch)
+	}
 
 	// serve OpenAPI spec for Swagger UI
 	router.HandleFunc("/api/docs/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
@@ -141,10 +167,24 @@ func (c *Container) Router() http.Handler {
 
 func (c *Container) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r)
+		started := time.Now()
+		writer := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(writer, r)
 		c.Logger.Info("request complete",
 			"method", r.Method,
 			"path", r.URL.Path,
+			"status", writer.status,
+			"durationMs", time.Since(started).Milliseconds(),
 		)
 	})
+}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
 }

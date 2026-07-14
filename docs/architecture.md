@@ -8,7 +8,7 @@ Fraud & Abuse Detection System is an MVP for e-commerce teams that need to find 
 | --- | --- |
 | Frontend | Analyst dashboard: upload, status, suspicious approvals, refund details. |
 | Gateway | Nginx entry point for `/api/...` routes. |
-| Upload Service | CSV upload, dataset preview, analysis jobs, status, `dataset.uploaded`. |
+| Upload Service | Bounded CSV ingestion, dataset/history APIs, job orchestration/audit, `dataset.uploaded`, and lifecycle event consumption. |
 | Relations Service | Refund relation API and relation-style features for scoring. |
 | Scoring Service | Rule-based risk score, risk level, explanations, scoring events. |
 | PostgreSQL | Dataset/job storage for implemented backend services. |
@@ -31,6 +31,7 @@ flowchart LR
 
   UP --> PG[(PostgreSQL)]
   UP -->|dataset.uploaded| MQ[(RabbitMQ pipeline.exchange)]
+  MQ -->|normalized / relations built / scoring completed / failed| UP
   MQ -. planned/partial: dataset.normalized .-> REL
   REL -->|refund.relations.built| MQ
   MQ -->|refund.relations.built| SCORE
