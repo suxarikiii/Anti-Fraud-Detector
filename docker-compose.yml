@@ -79,6 +79,9 @@ services:
       UPLOAD_MAX_ROWS: ${UPLOAD_MAX_ROWS:-250000}
       UPLOAD_MAX_VALIDATION_ERRORS: ${UPLOAD_MAX_VALIDATION_ERRORS:-100}
       ADMIN_STATUS_PATCH_ENABLED: "false"
+      NORMALIZED_DATASET_DIR: /normalized
+    volumes:
+      - normalized_data:/normalized
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,6 +107,7 @@ services:
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-pipeline.exchange}
     volumes:
       - ./data:/data:ro
+      - normalized_data:/normalized:ro
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -164,3 +168,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  normalized_data:

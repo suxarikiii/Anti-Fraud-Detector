@@ -82,6 +82,6 @@ Required secrets:
 
 ## Known Limits
 
-* ML/normalization service is still a follow-up integration component.
+* Normalization is embedded in Upload service; a separately scalable ML/normalization service is not included.
 * Monitoring stack is not included.
 * Scoring requires a dataset-scoped Relations snapshot; it has no UUID demo fallback.

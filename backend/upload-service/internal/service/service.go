@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	datasetUploadedRoutingKey  = "dataset.uploaded"
+	DatasetUploadedRoutingKey  = "dataset.uploaded"
 	maxPreviewRows             = 20
 	defaultMaxFileSize         = 50 << 20
 	defaultMaxRows             = 250_000
@@ -123,13 +123,14 @@ func (s *minioObjectStore) Delete(ctx context.Context, objectName string) error 
 }
 
 type Service struct {
-	repo        DatasetRepository
-	store       ObjectStore
-	publisher   Publisher
-	logger      *slog.Logger
-	maxFileSize int64
-	maxRows     int
-	maxErrors   int
+	repo          DatasetRepository
+	store         ObjectStore
+	publisher     Publisher
+	logger        *slog.Logger
+	maxFileSize   int64
+	maxRows       int
+	maxErrors     int
+	normalizedDir string
 }
 
 type datasetUploadedEvent struct {
@@ -150,6 +151,13 @@ func NewServiceWithStore(repo DatasetRepository, store ObjectStore, publisher Pu
 	return &Service{
 		repo: repo, store: store, publisher: publisher, logger: logger,
 		maxFileSize: defaultMaxFileSize, maxRows: defaultMaxRows, maxErrors: defaultMaxValidationErrors,
+		normalizedDir: "/tmp/upload-service-normalized",
+	}
+}
+
+func (s *Service) ConfigureNormalizationDir(outputDir string) {
+	if strings.TrimSpace(outputDir) != "" {
+		s.normalizedDir = filepath.Clean(outputDir)
 	}
 }
 
@@ -259,7 +267,7 @@ func (s *Service) startAnalysisJob(ctx context.Context, uploadedFile *domain.Upl
 		Timestamp:  now.Format(time.RFC3339),
 	}
 
-	if err := s.publisher.Publish(ctx, datasetUploadedRoutingKey, event); err != nil {
+	if err := s.publisher.Publish(ctx, DatasetUploadedRoutingKey, event); err != nil {
 		errorMessage := "Failed to publish dataset.uploaded event."
 		if updateErr := s.repo.UpdateAnalysisStatusWithError(ctx, job.ID, domain.AnalysisStatusFailed, job.CurrentStep, errorMessage, now); updateErr != nil {
 			if s.logger != nil {
@@ -592,6 +600,16 @@ var headerAliases = map[string]string{
 	"decision_time":         "timestamp",
 	"decision_time_minutes": "decision_time_minutes",
 	"resolution_minutes":    "decision_time_minutes",
+	"product_category":      "product_category",
+	"category":              "product_category",
+	"return_reason":         "return_reason",
+	"reason":                "return_reason",
+	"evidence_provided":     "evidence_provided",
+	"evidence":              "evidence_provided",
+	"has_photo":             "evidence_provided",
+	"proof_provided":        "evidence_provided",
+	"manual_override":       "manual_override",
+	"override":              "manual_override",
 }
 
 func buildAnalysisStatusResponse(job *domain.AnalysisJob) *AnalysisStatusResponse {

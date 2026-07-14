@@ -204,8 +204,8 @@ func TestUploadPreviewStartStatusFlow(t *testing.T) {
 	if len(publisher.messages) != 1 {
 		t.Fatalf("published messages = %d, want 1", len(publisher.messages))
 	}
-	if got := publisher.messages[0].routingKey; got != datasetUploadedRoutingKey {
-		t.Fatalf("routing key = %q, want %q", got, datasetUploadedRoutingKey)
+	if got := publisher.messages[0].routingKey; got != DatasetUploadedRoutingKey {
+		t.Fatalf("routing key = %q, want %q", got, DatasetUploadedRoutingKey)
 	}
 
 	event, ok := publisher.messages[0].payload.(datasetUploadedEvent)

@@ -13,12 +13,13 @@ import (
 const defaultEnvPath = ".env"
 
 type Config struct {
-	Server ServerConfig
-	DB     DBConfig
-	Rabbit RabbitConfig
-	MinIO  MinioConfig
-	Upload UploadConfig
-	Admin  AdminConfig
+	Server        ServerConfig
+	DB            DBConfig
+	Rabbit        RabbitConfig
+	MinIO         MinioConfig
+	Upload        UploadConfig
+	Normalization NormalizationConfig
+	Admin         AdminConfig
 }
 
 type ServerConfig struct {
@@ -52,6 +53,10 @@ type UploadConfig struct {
 	MaxFileSize int64
 	MaxRows     int
 	MaxErrors   int
+}
+
+type NormalizationConfig struct {
+	OutputDir string
 }
 
 type AdminConfig struct {
@@ -106,6 +111,9 @@ func Load() (*Config, error) {
 			MaxFileSize: int64(getIntEnv("UPLOAD_MAX_FILE_SIZE_BYTES", 50<<20)),
 			MaxRows:     getIntEnv("UPLOAD_MAX_ROWS", 250000),
 			MaxErrors:   getIntEnv("UPLOAD_MAX_VALIDATION_ERRORS", 100),
+		},
+		Normalization: NormalizationConfig{
+			OutputDir: getEnv("NORMALIZED_DATASET_DIR", "/tmp/upload-service-normalized"),
 		},
 		Admin: AdminConfig{StatusPatchEnabled: getBoolEnv("ADMIN_STATUS_PATCH_ENABLED", false)},
 	}

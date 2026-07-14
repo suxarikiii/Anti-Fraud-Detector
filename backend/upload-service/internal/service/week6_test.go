@@ -44,6 +44,20 @@ order_2,customer_2,return_1,agent_2,10,0,APPROVED,2026-06-01T09:06:00Z
 	}
 }
 
+func TestValidationAcceptsExactDuplicateAsNormalizationWarning(t *testing.T) {
+	body := cleanRefundCSV + "order_1001,customer_200,return_3001,agent_001,203.84,199.57,clothing,changed_mind,True,APPROVED,False,64,2026-06-01T09:06:00Z\n"
+	result, err := validateCSVStream(strings.NewReader(body), 100, 100)
+	if err != nil {
+		t.Fatalf("validate exact duplicate: %v", err)
+	}
+	if result.Rows != 3 {
+		t.Fatalf("raw rows = %d, want 3", result.Rows)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0].Code != "DUPLICATE_ROW" {
+		t.Fatalf("warnings = %+v", result.Warnings)
+	}
+}
+
 func TestValidationEnforcesRowLimit(t *testing.T) {
 	_, err := validateCSVStream(strings.NewReader(cleanRefundCSV), 1, 10)
 	var invalid *InvalidUploadError
@@ -170,6 +184,25 @@ func TestPipelineEventsCompleteAndAreIdempotent(t *testing.T) {
 	}
 	if status.Status != domain.AnalysisStatusCompleted || !status.ResultReady || status.ProgressPercent != 100 {
 		t.Fatalf("status=%+v", status)
+	}
+}
+
+func TestScoringCompletedAcceptsNumericTimestamp(t *testing.T) {
+	datasetID, jobID := uuid.New(), uuid.New()
+	repo := newFakeRepo()
+	now := time.Now().UTC()
+	repo.jobs[jobID] = &domain.AnalysisJob{
+		ID: jobID, DatasetID: datasetID, Status: domain.AnalysisStatusScoring,
+		CurrentStep: domain.AnalysisStatusScoring, CreatedAt: now, UpdatedAt: now,
+	}
+	service := NewServiceWithStore(repo, newFakeStore(), &fakePublisher{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	body := []byte(`{"datasetId":"` + datasetID.String() + `","jobId":"` + jobID.String() + `","timestamp":1784061520.530}`)
+
+	if err := service.HandlePipelineEvent(context.Background(), ScoringCompletedRoutingKey, body); err != nil {
+		t.Fatalf("handle scoring completion: %v", err)
+	}
+	if repo.jobs[jobID].Status != domain.AnalysisStatusCompleted || !repo.jobs[jobID].ResultReady {
+		t.Fatalf("job = %+v", repo.jobs[jobID])
 	}
 }
 

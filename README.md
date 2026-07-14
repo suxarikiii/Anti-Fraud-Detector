@@ -8,7 +8,7 @@ Anti-Fraud Detector is an event-driven platform for finding suspicious refund ap
 
 | Component | Purpose | Local entry point |
 | --- | --- | --- |
-| [Frontend](frontend/README.md) | Upload, progress, investigation, decisions, and export UI | `http://localhost` |
+| [Frontend](frontend/README.md) | Upload, progress, and investigation UI | `http://localhost` |
 | [Gateway](backend/gateway/README.md) | Single HTTP entry point and backend routing | `http://localhost:8080` |
 | [Upload Service](backend/upload-service/README.md) | CSV validation, storage, dataset metadata, and pipeline state | Internal `:8081` |
 | [Relations Service](backend/relations-service/README.md) | Relationship graph and derived features | `http://localhost:8082` |
@@ -118,30 +118,23 @@ Start with the [documentation index](docs/README.md). The key references are:
 - [Operations and deployment](docs/devops.md)
 - [Demo flow](docs/demo-flow.md)
 - [Release readiness](docs/release-readiness.md)
+- [Frontend external E2E checklist](docs/frontend-e2e-checklist.md)
 
 Service-specific setup, configuration, interactions, and workflows live next to each service in its own README.
 
-## Completed bonus goals
+## Completed backend capabilities
 
-In addition to the core MVP, the team completed the following bonus goals defined at the start of the project:
+- Dataset history, terminal archive, analysis retry, and lifecycle audit.
+- Idempotent start/retry and reliable RabbitMQ retry/DLQ processing.
+- Dataset-scoped relation features and bounded investigation graphs.
+- Persisted scoring results, investigation decisions, and filtered CSV export.
+- Deterministic scoring validation against shared golden fixtures.
 
-- **Dataset management:** Upload Service provides dataset history, terminal archive, analysis retry, and a persistent lifecycle audit.
-- **Idempotent orchestration:** repeated start and retry requests reuse the claimed or previously created job, reducing duplicate pipeline processing.
-- **Reliable asynchronous processing:** the Upload Service consumer uses bounded RabbitMQ retries, persistent republishing, publisher confirms, manual acknowledgements, and a durable dead-letter queue.
-- **Support-agent investigation context:** dataset-scoped risk summaries combine approval rate, override rate, high-risk approvals, top reasons, and business-readable relation context.
-- **Relationship risk signals:** scoring includes repeated customer-agent pairs and suspicious relation clusters derived by Relations Service.
-- **Detailed scoring explanations:** each result contains a top reason and individual business-readable reasons with their score impact.
-- **Analyst decision controls:** the frontend lets an analyst choose a follow-up action and outcome and enter reviewer notes.
-- **Dirty-export validation:** the normalization and scoring pipeline is validated against three independently generated business exports: Business, ShopFlow, and RetailHub.
-- **Shared Python-Kotlin golden fixtures:** the Python validator mirrors the Kotlin scoring contract and reproduces all `45/45` frozen demo cases.
-- **Automated scoring-quality checks:** deterministic validation reports precision, recall, false positives, and missed suspicious cases and fails on scenario regressions.
-- **Repeatable release verification:** deployment smoke-test commands and a stable end-to-end demo flow are documented for the team.
-
-Implementation evidence is available in the [Upload Service implementation notes](backend/upload-service/IMPLEMENTATION.md), [scoring rules](docs/scoring-rules.md), [API contracts](docs/api-contracts.md), [demo flow](docs/demo-flow.md), [`evaluate_scenarios.py`](docs/scripts/evaluate_scenarios.py), and [`validate_pipeline.py`](docs/scripts/validate_pipeline.py).
+The frontend uses upload, status, scoring details, customer/agent analytics, the relation graph, persisted analyst decisions, filtered CSV export, and dataset history/retry/archive APIs.
 
 ## Project status
 
-The repository contains an integrated release-candidate implementation. Before calling a public deployment production-ready, verify the live scoring health endpoint and capture a complete upload-to-results run; the current evidence and remaining checks are tracked in [release readiness](docs/release-readiness.md).
+The repository contains a release-candidate implementation with a connected upload → normalization → relations → scoring flow. The public deployment must still be verified against the exact release commit. Remaining checks are tracked in [release readiness](docs/release-readiness.md).
 
 ## License
 
