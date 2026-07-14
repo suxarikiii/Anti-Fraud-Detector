@@ -12,5 +12,7 @@ data class RefundApprovalRiskScore(
     val riskLevel: RiskLevel,
     val topReason: String,
     val reasons: List<RiskReason>,
+    val featureSource: String,
+    val calculationVersion: Long,
     val calculatedAt: Instant
 )

@@ -1,82 +1,82 @@
-<h1 align="center">Architecture</h1>
+# Architecture — Week 6 RC
 
-Fraud & Abuse Detection System is an MVP for e-commerce teams that need to find suspicious refund approvals in support workflows.
+Fraud & Abuse Detection System is an explainable refund-investigation MVP. All public API calls enter through Nginx; service-to-service handoffs use RabbitMQ and an internal dataset-scoped Relations API.
 
-## Current Components
+## Components and ports
 
-| Component | Responsibility |
-| --- | --- |
-| Frontend | Analyst dashboard: upload, status, suspicious approvals, refund details. |
-| Gateway | Nginx entry point for `/api/...` routes. |
-| Upload Service | Bounded CSV ingestion, dataset/history APIs, job orchestration/audit, `dataset.uploaded`, and lifecycle event consumption. |
-| Relations Service | Refund relation API and relation-style features for scoring. |
-| Scoring Service | Rule-based risk score, risk level, explanations, scoring events. |
-| PostgreSQL | Dataset/job storage for implemented backend services. |
-| RabbitMQ | Pipeline exchange: `pipeline.exchange`. |
+| Component | Internal port | Responsibility |
+| --- | ---: | --- |
+| Frontend | `80` | Upload, lifecycle status, suspicious approvals, investigation UI. |
+| Gateway | `8080` | Routes `/api/datasets`, `/api/analysis`, `/api/relations`, `/api/scoring`. |
+| Upload Service | `8081` | CSV ingestion, MinIO objects, dataset/job lifecycle and audit. |
+| Relations Service | `8082` | Dataset-scoped normalized records, graph relations, persisted-in-service feature snapshot. |
+| Scoring Service | `8083` | Rules, versioned results/reasons, analyst decisions, filters and export. |
+| PostgreSQL | `5432` | Upload lifecycle and durable scoring/investigation state. |
+| RabbitMQ | `5672` / `15672` | Durable topic exchange and management UI. |
+| MinIO | `9000` / `9001` | Uploaded dataset objects and console. |
 
-Planned / partial:
-
-* ML / Normalization Service is not a current root Compose service.
-* Current demo normalization is represented by prepared clean/dirty datasets, mapping docs, and validation artifacts.
-* Dedicated Graph DB storage is not connected yet.
-
-## Flow
+## Dataset-scoped scoring flow
 
 ```mermaid
-flowchart LR
-  FE[Frontend] --> GW[Nginx Gateway]
-  GW --> UP[Upload Service]
-  GW --> REL[Relations Service]
-  GW --> SCORE[Scoring Service]
+sequenceDiagram
+  participant R as Relations Service
+  participant MQ as RabbitMQ
+  participant S as Scoring Service
+  participant DB as PostgreSQL
+  participant UI as Analyst UI
 
-  UP --> PG[(PostgreSQL)]
-  UP -->|dataset.uploaded| MQ[(RabbitMQ pipeline.exchange)]
-  MQ -->|normalized / relations built / scoring completed / failed| UP
-  MQ -. planned/partial: dataset.normalized .-> REL
-  REL -->|refund.relations.built| MQ
-  MQ -->|refund.relations.built| SCORE
-  SCORE -->|refund.scoring.completed| MQ
+  R->>MQ: refund.relations.built(datasetId, jobId, featureVersion)
+  MQ->>S: event (at-least-once delivery)
+  S->>DB: check idempotency key
+  S->>R: GET /datasets/{datasetId}/scoring-inputs
+  R-->>S: same-version records + relation features
+  S->>DB: scoring_calculations + scoring_results + risk_reasons
+  S->>DB: scoring_processed_events
+  S->>MQ: refund.scoring.completed
+  UI->>S: results / decision / filtered export
+  S->>DB: read latest calculation + investigation decision
 ```
 
-## Pipeline Events
+The handoff is atomic at the Relations snapshot boundary: every record and feature envelope carries the requested `datasetId`, and the response has one `featureVersion`. Scoring rejects cross-dataset records, missing features, and version mismatch.
 
-| Event | Producer | Consumer | Purpose |
+Production scoring uses `featureSource: RELATIONS_SERVICE`. `DEMO_CSV` is available only when `SCORING_DEMO_ENABLED=true` (tests or an explicitly configured demo); it is never selected for an arbitrary UUID.
+
+## Persistence
+
+Flyway owns these scoring tables:
+
+| Table | Purpose |
+| --- | --- |
+| `scoring_calculations` | One version row per dataset recalculation. |
+| `scoring_results` | Record facts, score, level, source, feature JSON and timestamps. |
+| `risk_reasons` | Ordered, queryable reason rows with score impact. |
+| `investigation_decisions` | Durable analyst action/outcome/note and audit timestamps. |
+| `scoring_processed_events` | Duplicate RabbitMQ delivery protection. |
+
+Results are append-versioned. Read APIs return the latest calculation; analyst decisions are keyed by dataset/return and therefore survive recalculation and service restart.
+
+## Events
+
+| Routing key | Producer | Consumer | Required fields |
 | --- | --- | --- | --- |
-| `dataset.uploaded` | Upload Service | Normalization stage | Dataset is stored and ready to process. |
-| `dataset.normalized` | Normalization stage | Relations Service | Internal refund records are ready. |
-| `refund.relations.built` | Relations Service | Scoring Service | Relation features are ready or can be derived. |
-| `refund.scoring.completed` | Scoring Service | Status/API layer | Scores and suspicious counts are calculated. |
-| `pipeline.failed` | Any stage | Status/API layer | Processing failed with a reason. |
+| `dataset.uploaded` | Upload | normalization stage | `datasetId`, `jobId`, object metadata |
+| `dataset.normalized` | normalization stage | Relations | `datasetId`, `jobId`, `recordsPath`, `recordCount`, `schemaVersion` |
+| `refund.relations.built` | Relations | Scoring, lifecycle | `datasetId`, `jobId`, `recordsCount`, `featuresCount`, `featureVersion` |
+| `refund.scoring.completed` | Scoring | lifecycle | `datasetId`, `jobId`, `scoredApprovalsCount`, `suspiciousApprovalsCount` |
+| `pipeline.failed` | any stage | lifecycle | `datasetId`, `jobId`, `stage`, `errorCode`, `errorMessage` |
 
-## Relation Model
+Scoring's event key is `datasetId:jobId:featureVersion`; without a job ID it is `datasetId:feature:featureVersion`. Duplicate deliveries return the stored counts and do not create a second calculation.
 
-The graph-oriented model connects:
+## Statuses
 
 ```text
-Customer -> Order -> ReturnRequest -> SupportAgent -> Decision -> ProductCategory
+UPLOADED -> NORMALIZING -> NORMALIZED -> BUILDING_RELATIONS -> SCORING -> COMPLETED
+                                                                  \-> FAILED
 ```
 
-Important relation signals:
+## Honest limitations
 
-* frequent customer returns;
-* high support-agent approval rate;
-* repeated customer-agent approval pattern;
-* suspicious relation cluster;
-* refund amount ratio.
-
-In the current MVP, Scoring Service exposes these relation-style fields with `featureSource: "CSV_DERIVED_FALLBACK"` until persisted relation-feature handoff is connected.
-
-## Design Decisions
-
-| Decision | Rationale |
-| --- | --- |
-| Async pipeline | Upload, normalization, relations, and scoring can take different amounts of time; RabbitMQ keeps services decoupled. |
-| Gateway first | Frontend uses one `/api` entry point instead of service-specific URLs. |
-| Rule-based scoring | Deterministic, explainable, and easier to validate before real labelled fraud data exists. |
-| Risk explanations | Analysts need reasons, not only a score, to trust and act on flagged approvals. |
-
-## Known Limits
-
-* Full normalization and persisted relation-feature storage are still follow-up integration work.
-* Uploaded UUID datasets currently use scoring CSV fallback until normalized storage is connected.
-* Dedicated Graph DB storage is not connected and remains optional/future work for the MVP demo.
+* A dedicated normalization service/producer is not present in the root Compose file; it remains the external team dependency between `dataset.uploaded` and `dataset.normalized`.
+* Relations snapshots are rebuilt in memory from the normalized artifact. Scoring results and analyst work are durable; the Relations in-memory cache must be rebuilt after restart.
+* A dedicated graph database is not connected; graph projections are calculated by Relations service logic.
+* Public deployment must not be called release-ready until the deployed SHA is matched to the documented RC SHA.

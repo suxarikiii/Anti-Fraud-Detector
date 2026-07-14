@@ -11,8 +11,11 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.mock.mockito.MockBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 
 @SpringBootTest(
     properties = [
@@ -111,7 +114,7 @@ class ScoringControllerIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.relationFeatures.clusterSize", greaterThanOrEqualTo(5)))
             .andExpect(jsonPath("$.relationFeatures.refundAmountRatio").exists())
             .andExpect(jsonPath("$.relationFeatures.strongestRelationType").value("REPEATED_AGENT_CUSTOMER_PAIR"))
-            .andExpect(jsonPath("$.relationFeatures.featureSource").value("CSV_DERIVED_FALLBACK"))
+            .andExpect(jsonPath("$.relationFeatures.featureSource").value("DEMO_CSV"))
             .andExpect(jsonPath("$.calculatedAt").exists())
     }
 
@@ -141,12 +144,12 @@ class ScoringControllerIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `should return clean JSON error for unknown dataset`() {
+    fun `should return controlled dependency error without demo fallback for unknown dataset`() {
         mockMvc.perform(get("/api/scoring/datasets/missing-dataset/suspicious-approvals"))
-            .andExpect(status().isNotFound)
-            .andExpect(jsonPath("$.status").value(404))
-            .andExpect(jsonPath("$.error").value("Not Found"))
-            .andExpect(jsonPath("$.message").value("Dataset was not found: missing-dataset"))
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(jsonPath("$.status").value(503))
+            .andExpect(jsonPath("$.error").value("Service Unavailable"))
+            .andExpect(jsonPath("$.errorCode").value("RELATIONS_UNAVAILABLE"))
             .andExpect(jsonPath("$.path").value("/api/scoring/datasets/missing-dataset/suspicious-approvals"))
     }
 
@@ -156,5 +159,43 @@ class ScoringControllerIntegrationTest @Autowired constructor(
             .andExpect(status().isNotFound)
             .andExpect(jsonPath("$.status").value(404))
             .andExpect(jsonPath("$.message").value("Return approval was not found: missing_return in dataset: demo"))
+    }
+
+    @Test
+    fun `should create and read analyst decision`() {
+        val body = """{"action":"ESCALATE","outcome":"NEEDS_MORE_INFO","note":"Проверить чек","analystId":"mvc-analyst"}"""
+        mockMvc.perform(
+            put("/api/scoring/datasets/demo/returns/return_3005/decision")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.outcome").value("NEEDS_MORE_INFO"))
+            .andExpect(jsonPath("$.note").value("Проверить чек"))
+
+        mockMvc.perform(get("/api/scoring/datasets/demo/returns/return_3005/decision"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.analystId").value("mvc-analyst"))
+    }
+
+    @Test
+    fun `should reject invalid decision enum`() {
+        mockMvc.perform(
+            put("/api/scoring/datasets/demo/returns/return_3006/decision")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"action":"UNKNOWN","outcome":"OPEN"}""")
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.errorCode").value("INVALID_REQUEST"))
+    }
+
+    @Test
+    fun `should export UTF-8 CSV with attachment header`() {
+        mockMvc.perform(get("/api/scoring/datasets/demo/export.csv?risk=CRITICAL"))
+            .andExpect(status().isOk)
+            .andExpect(content().contentTypeCompatibleWith("text/csv;charset=UTF-8"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                .string("Content-Disposition", "attachment; filename=\"scoring-demo.csv\""))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("return_3041")))
     }
 }

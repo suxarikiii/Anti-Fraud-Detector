@@ -1,4 +1,4 @@
-<h1 align="center">Demo Flow</h1>
+# Demo flow
 
 The demo shows the analyst path from refund dataset upload to investigation of a suspicious approval.
 

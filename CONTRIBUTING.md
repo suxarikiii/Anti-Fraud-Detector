@@ -1,100 +1,60 @@
-<h2 align="center">Branch Structure</h2>
+# Contributing
 
-The repository uses several main working branches based on project areas:
+Keep changes focused, tested, and easy to review. The repository is split into four working areas:
 
-```text
-backend
-frontend
-devops
-ml
+| Branch / area | Scope |
+| --- | --- |
+| `backend` | Services, APIs, business logic, and persistence |
+| `frontend` | Analyst UI and browser-side behavior |
+| `devops` | Docker, CI/CD, deployment, and infrastructure |
+| `ml` | Data generation, normalization, anomaly detection, and metrics |
+
+Use the matching area branch unless the team has agreed on a task-specific branch. Cross-area work may be split into separate pull requests when that makes ownership or review clearer.
+
+## Before opening a pull request
+
+1. Rebase or merge the latest target branch according to the team's workflow.
+2. Run the checks for every area you changed.
+3. Update API, event, configuration, or workflow documentation with the code.
+4. State known limitations and follow-up work explicitly.
+5. Open the pull request into `main` and request at least one review.
+
+Useful checks:
+
+```bash
+(cd backend/upload-service && go test ./...)
+(cd backend/relations-service && go test ./...)
+(cd backend/scoring-service && ./gradlew clean test build)
+(cd frontend && npm test && npm run build)
+docker compose config --quiet
 ```
 
-Each branch is responsible for a specific part of the project:
+## Commit messages
 
-<table align="center">
-  <tr>
-    <th align="center">Branch</th>
-    <th align="center">Responsibility</th>
-  </tr>
-  <tr>
-    <td align="center"><code>backend</code></td>
-    <td align="center">Backend services, APIs, business logic, database interaction</td>
-  </tr>
-  <tr>
-    <td align="center"><code>frontend</code></td>
-    <td align="center">Analyst dashboard, UI components, frontend logic</td>
-  </tr>
-  <tr>
-    <td align="center"><code>devops</code></td>
-    <td align="center">Deployment, Docker, VM configuration, CI/CD, infrastructure</td>
-  </tr>
-  <tr>
-    <td align="center"><code>ml</code></td>
-    <td align="center">Synthetic data generation, ML-assisted scoring, anomaly detection, validation metrics</td>
-  </tr>
-</table>
+Use a short imperative summary:
 
----
+```text
+type: description
+```
 
-<h2 align="center">Working with Branches</h2>
-
-All changes should be committed to the branch that matches the area of work.
+Common types are `feat`, `fix`, `docs`, `test`, `refactor`, and `chore`.
 
 Examples:
 
 ```text
-backend  -> event ingestion API, database models, scoring endpoints
-frontend -> dashboard pages, tables, filters, user details UI
-devops   -> Docker setup, VM deployment, environment configuration
-ml       -> dataset generator, anomaly detection, metrics calculation
+feat: add dataset scoring export
+fix: preserve failed pipeline context
+docs: clarify relations event flow
 ```
 
-If a task affects multiple areas, the team should decide where the main change belongs. If needed, the task can be split into several pull requests across different branches.
+## Pull request content
 
----
+Include:
 
-<h2 align="center">Pull Request Flow</h2>
+- the problem and the chosen solution;
+- important files or contracts changed;
+- commands run and their results;
+- screenshots or API evidence when behavior is user-visible;
+- migrations, compatibility notes, known gaps, and rollback considerations.
 
-The usual flow is:
-
-```text
-backend / frontend / devops / ml -> main
-```
-
-Each pull request should be created from one of the working branches into `main`.
-
-Before merging into `main`, the pull request should be reviewed by at least one team member.
-
-The working branches `backend`, `frontend`, `devops`, and `ml` are permanent branches and should not be deleted after merging.
-
----
-
-<h2 align="center">Commit Messages</h2>
-
-Commit messages should be short and clear.
-
-Recommended format:
-
-```text
-type: short description
-```
-
-Examples:
-
-```text
-feat: add event ingestion endpoint
-fix: correct risk score calculation
-docs: update architecture overview
-chore: add initial project structure
-refactor: simplify user risk service
-test: add scoring tests
-```
-
-Recommended commit types:
-
-* `feat` — new functionality;
-* `fix` — bug fixes;
-* `docs` — documentation changes;
-* `chore` — repository setup, configuration, maintenance;
-* `refactor` — code improvements without changing behavior;
-* `test` — tests.
+Do not include secrets, generated build output, or unrelated formatting changes.

@@ -265,6 +265,22 @@ func (h *Handler) DatasetReturnFeaturesHandler(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, features)
 }
 
+func (h *Handler) DatasetScoringInputsHandler(w http.ResponseWriter, r *http.Request) {
+	datasetID := mux.Vars(r)["datasetId"]
+	if datasetID == "" {
+		writeError(w, http.StatusBadRequest, "dataset id is required")
+		return
+	}
+
+	inputs, err := h.Service.GetScoringInputs(datasetID)
+	if err != nil {
+		writeLookupError(w, err, "dataset %s not found", datasetID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, inputs)
+}
+
 func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

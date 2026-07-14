@@ -2,9 +2,7 @@ package com.antifrod.scoring.service
 
 import com.antifrod.scoring.model.RefundApprovalFeatures
 import com.antifrod.scoring.model.RefundApprovalRecord
-import org.springframework.stereotype.Component
 
-@Component
 class CsvDerivedFeatureProvider : FeatureProvider {
 
     override fun buildFeatures(
@@ -49,7 +47,7 @@ class CsvDerivedFeatureProvider : FeatureProvider {
             customerAgentPairCount = customerAgentPairCount,
             clusterSize = clusterSize,
             strongestRelationType = resolveStrongestRelationType(customerReturnCount, customerAgentPairCount, clusterSize),
-            featureSource = "CSV_DERIVED_FALLBACK"
+            featureSource = "DEMO_CSV"
         )
     }
 

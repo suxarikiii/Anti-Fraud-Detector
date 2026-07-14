@@ -57,7 +57,7 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew build -x test   # тесты временно пропущены
+      - run: ./gradlew clean test build
       - name: Build image
         run: docker build -t scoring-service:ci .
 
