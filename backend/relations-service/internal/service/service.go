@@ -338,6 +338,31 @@ func (s *Service) GetReturnFeaturesForDataset(datasetID, returnID string) (*doma
 	return &features, nil
 }
 
+func (s *Service) GetScoringInputs(datasetID string) (*domain.ScoringInputsResponse, error) {
+	state, err := s.requireDataset(datasetID)
+	if err != nil {
+		return nil, err
+	}
+
+	features := make([]domain.ReturnFeaturesResponse, 0, len(state.records))
+	for _, record := range state.records {
+		feature, ok := state.features[record.ReturnID]
+		if !ok {
+			return nil, fmt.Errorf("%w: features are missing for return %s", ErrInvalidDataset, record.ReturnID)
+		}
+		features = append(features, feature)
+	}
+
+	return &domain.ScoringInputsResponse{
+		DatasetID:      state.metadata.DatasetID,
+		SchemaVersion:  state.metadata.SchemaVersion,
+		FeatureVersion: state.metadata.FeatureVersion,
+		CalculatedAt:   state.metadata.CalculatedAt,
+		Records:        state.records,
+		Features:       features,
+	}, nil
+}
+
 func (s *Service) GetRelatedReturns(datasetID, returnID string, limit int) (*domain.RelatedReturnsResponse, error) {
 	state, err := s.requireDataset(datasetID)
 	if err != nil {
@@ -575,6 +600,7 @@ func calculateFeatures(target domain.NormalizedReturnRecord, records []domain.No
 	return domain.RelationFeatures{
 		CustomerReturnCount:           customerReturnCount,
 		CustomerApprovedRefundCount:   customerApprovedRefundCount,
+		AgentDecisionCount:            agentDecisionCount,
 		AgentApprovalRate:             ratio(agentApprovedCount, agentDecisionCount),
 		AgentManualOverrideRate:       ratio(agentManualOverrideCount, agentDecisionCount),
 		AgentHighValueApprovalCount:   agentHighValueApprovalCount,
@@ -1001,6 +1027,13 @@ func parseNormalizedReturnRecord(datasetID string, row []string, index map[strin
 		return domain.NormalizedReturnRecord{}, err
 	}
 	returnID := readString(row, index, "return_id")
+	evidenceProvided := false
+	if value := readString(row, index, "evidence_provided"); value != "" {
+		evidenceProvided, err = strconv.ParseBool(value)
+		if err != nil {
+			return domain.NormalizedReturnRecord{}, fmt.Errorf("invalid evidence_provided: %w", err)
+		}
+	}
 
 	return domain.NormalizedReturnRecord{
 		DatasetID:           datasetID,
@@ -1014,8 +1047,10 @@ func parseNormalizedReturnRecord(datasetID string, row []string, index map[strin
 		DecisionStatus:      strings.ToUpper(readString(row, index, "decision")),
 		RefundAmount:        refundAmount,
 		OrderAmount:         orderAmount,
+		EvidenceProvided:    evidenceProvided,
 		ManualOverride:      manualOverride,
 		DecisionTimeMinutes: decisionTimeMinutes,
+		Timestamp:           readString(row, index, "timestamp"),
 	}, nil
 }
 

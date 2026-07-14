@@ -53,6 +53,29 @@ func TestFeaturesEndpointSmoke(t *testing.T) {
 	}
 }
 
+func TestScoringInputsEndpointIsDatasetScoped(t *testing.T) {
+	router := testRouter()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/relations/datasets/demo/scoring-inputs", nil)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var payload domain.ScoringInputsResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if payload.DatasetID != "demo" || len(payload.Records) != 2 || len(payload.Features) != 2 {
+		t.Fatalf("unexpected scoring inputs: %+v", payload)
+	}
+	for _, record := range payload.Records {
+		if record.DatasetID != payload.DatasetID {
+			t.Fatalf("record %s escaped dataset scope", record.ReturnID)
+		}
+	}
+}
+
 func TestRebuildEndpointSmoke(t *testing.T) {
 	router := testRouter()
 
@@ -156,6 +179,7 @@ func testRouter() http.Handler {
 
 	router := mux.NewRouter()
 	router.HandleFunc("/api/relations/datasets/{datasetId}/rebuild", handler.RebuildDatasetHandler).Methods(http.MethodPost)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/scoring-inputs", handler.DatasetScoringInputsHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}", handler.DatasetReturnRelationsHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}/features", handler.DatasetReturnFeaturesHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}/related", handler.DatasetRelatedReturnsHandler).Methods(http.MethodGet)

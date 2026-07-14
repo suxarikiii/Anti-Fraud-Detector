@@ -53,6 +53,7 @@ func (c *Container) Router() http.Handler {
 	router := mux.NewRouter()
 	router.HandleFunc("/api/relations/health", c.Handler.HealthHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/rebuild", c.Handler.RebuildDatasetHandler).Methods(http.MethodPost)
+	router.HandleFunc("/api/relations/datasets/{datasetId}/scoring-inputs", c.Handler.DatasetScoringInputsHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}", c.Handler.DatasetReturnRelationsHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}/features", c.Handler.DatasetReturnFeaturesHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/relations/datasets/{datasetId}/returns/{returnId}/related", c.Handler.DatasetRelatedReturnsHandler).Methods(http.MethodGet)

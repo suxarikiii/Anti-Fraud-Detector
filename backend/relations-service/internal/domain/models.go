@@ -24,8 +24,23 @@ type NormalizedReturnRecord struct {
 	DecisionStatus      string  `json:"decisionStatus"`
 	RefundAmount        float64 `json:"refundAmount"`
 	OrderAmount         float64 `json:"orderAmount"`
+	EvidenceProvided    bool    `json:"evidenceProvided"`
 	ManualOverride      bool    `json:"manualOverride"`
 	DecisionTimeMinutes int     `json:"decisionTimeMinutes"`
+	Timestamp           string  `json:"timestamp"`
+}
+
+// ScoringInputsResponse is the dataset-scoped handoff contract between
+// relations-service and scoring-service. Records and their calculated relation
+// features are returned from the same immutable in-memory dataset version so a
+// scoring run can never mix data from two uploads.
+type ScoringInputsResponse struct {
+	DatasetID      string                   `json:"datasetId"`
+	SchemaVersion  string                   `json:"schemaVersion"`
+	FeatureVersion int64                    `json:"featureVersion"`
+	CalculatedAt   string                   `json:"calculatedAt"`
+	Records        []NormalizedReturnRecord `json:"records"`
+	Features       []ReturnFeaturesResponse `json:"features"`
 }
 
 type DatasetMetadata struct {
@@ -109,6 +124,7 @@ type ReturnFeaturesResponse struct {
 type RelationFeatures struct {
 	CustomerReturnCount           int      `json:"customerReturnCount"`
 	CustomerApprovedRefundCount   int      `json:"customerApprovedRefundCount"`
+	AgentDecisionCount            int      `json:"agentDecisionCount"`
 	AgentApprovalRate             float64  `json:"agentApprovalRate"`
 	AgentManualOverrideRate       float64  `json:"agentManualOverrideRate"`
 	AgentHighValueApprovalCount   int      `json:"agentHighValueApprovalCount"`
