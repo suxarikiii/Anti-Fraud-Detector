@@ -59,8 +59,8 @@ Results are append-versioned. Read APIs return the latest calculation; analyst d
 
 | Routing key | Producer | Consumer | Required fields |
 | --- | --- | --- | --- |
-| `dataset.uploaded` | Upload | normalization stage | `datasetId`, `jobId`, object metadata |
-| `dataset.normalized` | normalization stage | Relations | `datasetId`, `jobId`, `recordsPath`, `recordCount`, `schemaVersion` |
+| `dataset.uploaded` | Upload | Upload normalization consumer | `datasetId`, `jobId`, object metadata |
+| `dataset.normalized` | Upload normalization consumer | Relations | `datasetId`, `jobId`, `recordsPath`, `recordCount`, `schemaVersion` |
 | `refund.relations.built` | Relations | Scoring, lifecycle | `datasetId`, `jobId`, `recordsCount`, `featuresCount`, `featureVersion` |
 | `refund.scoring.completed` | Scoring | lifecycle | `datasetId`, `jobId`, `scoredApprovalsCount`, `suspiciousApprovalsCount` |
 | `pipeline.failed` | any stage | lifecycle | `datasetId`, `jobId`, `stage`, `errorCode`, `errorMessage` |
@@ -76,7 +76,7 @@ UPLOADED -> NORMALIZING -> NORMALIZED -> BUILDING_RELATIONS -> SCORING -> COMPLE
 
 ## Honest limitations
 
-* A dedicated normalization service/producer is not present in the root Compose file; it remains the external team dependency between `dataset.uploaded` and `dataset.normalized`.
+* Normalization runs inside Upload service and writes canonical artifacts to the shared `normalized_data` volume. A separately scalable normalization service is not included.
 * Relations snapshots are rebuilt in memory from the normalized artifact. Scoring results and analyst work are durable; the Relations in-memory cache must be rebuilt after restart.
 * A dedicated graph database is not connected; graph projections are calculated by Relations service logic.
 * Public deployment must not be called release-ready until the deployed SHA is matched to the documented RC SHA.

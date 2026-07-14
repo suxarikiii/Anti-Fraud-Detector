@@ -8,6 +8,7 @@ Go service that owns CSV ingestion and the analysis lifecycle. It validates uplo
 - store accepted files under a generated dataset ID;
 - expose dataset list, details, preview, archive, and analysis APIs;
 - publish `dataset.uploaded` exactly once when a job starts;
+- consume `dataset.uploaded`, normalize accepted CSV aliases into `refund-normalized.v1`, and publish `dataset.normalized`;
 - consume downstream lifecycle events and persist progress, failures, and audit history.
 
 ## Service interactions
@@ -18,6 +19,8 @@ flowchart LR
     Upload -->|files| MinIO[(MinIO)]
     Upload -->|metadata and jobs| DB[(PostgreSQL)]
     Upload -->|dataset.uploaded| MQ[(RabbitMQ)]
+    MQ -->|dataset.uploaded| Upload
+    Upload -->|dataset.normalized| MQ
     MQ -->|dataset.normalized| Upload
     MQ -->|refund.relations.built| Upload
     MQ -->|refund.scoring.completed| Upload
@@ -42,6 +45,9 @@ sequenceDiagram
     C->>U: POST /api/analysis/{datasetId}/start
     U->>Q: Publish dataset.uploaded
     U->>D: Set NORMALIZING
+    Q-->>U: dataset.uploaded
+    U->>U: Normalize into shared dataset artifact
+    U->>Q: Publish dataset.normalized
     Q-->>U: Downstream lifecycle events
     U->>D: Advance stage or record failure
     C->>U: GET /api/analysis/{jobId}/status
@@ -76,6 +82,7 @@ The machine-readable contract is in [`docs/openapi.yaml`](docs/openapi.yaml).
 | `RABBITMQ_URL`, `RABBITMQ_EXCHANGE` | Event transport | local RabbitMQ, `pipeline.exchange` |
 | `RABBITMQ_UPLOAD_EVENTS_QUEUE`, `RABBITMQ_UPLOAD_DLQ`, `RABBITMQ_MAX_RETRIES` | Durable consumer and retry policy | project defaults |
 | `UPLOAD_MAX_FILE_SIZE_BYTES`, `UPLOAD_MAX_ROWS`, `UPLOAD_MAX_VALIDATION_ERRORS` | Input bounds | 50 MiB, 250,000 rows, 100 errors |
+| `NORMALIZED_DATASET_DIR` | Shared directory for canonical CSV artifacts consumed by Relations | `/tmp/upload-service-normalized` |
 
 Use the root `.env.example` as the supported Compose configuration.
 

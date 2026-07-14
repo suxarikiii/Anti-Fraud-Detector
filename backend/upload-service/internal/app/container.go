@@ -79,6 +79,7 @@ func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
 
 	var rabbitConsumer *rabbitmq.Consumer
 	routingKeys := []string{
+		service.DatasetUploadedRoutingKey,
 		service.DatasetNormalizedRoutingKey,
 		service.RelationsBuiltRoutingKey,
 		service.ScoringCompletedRoutingKey,
@@ -88,9 +89,10 @@ func NewContainer(logger *slog.Logger, cfg *config.Config) (*Container, error) {
 	repo := repository.NewRepository(db)
 	uploadService := service.NewService(repo, minioClient, cfg.MinIO.Bucket, rabbitPublisher, logger)
 	uploadService.ConfigureUploadLimits(cfg.Upload.MaxFileSize, cfg.Upload.MaxRows, cfg.Upload.MaxErrors)
+	uploadService.ConfigureNormalizationDir(cfg.Normalization.OutputDir)
 	if err := retryDependency(logger, "rabbitmq lifecycle consumer", func() error {
 		var consumerErr error
-		rabbitConsumer, consumerErr = rabbitmq.NewConsumer(cfg.Rabbit, routingKeys, uploadService.HandlePipelineEvent, logger)
+		rabbitConsumer, consumerErr = rabbitmq.NewConsumer(cfg.Rabbit, routingKeys, uploadService.HandleRabbitEvent, logger)
 		return consumerErr
 	}); err != nil {
 		rabbitPublisher.Close()
@@ -147,14 +149,14 @@ func (c *Container) Router() http.Handler {
 	router.HandleFunc("/api/datasets/health", c.Handler.HealthHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/datasets/upload", c.Handler.UploadHandler).Methods(http.MethodPost)
 	router.HandleFunc("/api/datasets", c.Handler.ListDatasetsHandler).Methods(http.MethodGet)
-	router.HandleFunc("/api/datasets/{datasetId}/preview", c.Handler.PreviewHandler).Methods(http.MethodGet)
-	router.HandleFunc("/api/datasets/{datasetId}", c.Handler.DatasetDetailsHandler).Methods(http.MethodGet)
-	router.HandleFunc("/api/datasets/{datasetId}/archive", c.Handler.ArchiveDatasetHandler).Methods(http.MethodPost)
-	router.HandleFunc("/api/analysis/{datasetId}/start", c.Handler.StartAnalysisHandler).Methods(http.MethodPost)
-	router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.StatusHandler).Methods(http.MethodGet)
-	router.HandleFunc("/api/analysis/{jobId}/retry", c.Handler.RetryAnalysisHandler).Methods(http.MethodPost)
+	router.HandleFunc("/api/datasets/{datasetId:[0-9a-fA-F-]{36}}/preview", c.Handler.PreviewHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/datasets/{datasetId:[0-9a-fA-F-]{36}}", c.Handler.DatasetDetailsHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/datasets/{datasetId:[0-9a-fA-F-]{36}}/archive", c.Handler.ArchiveDatasetHandler).Methods(http.MethodPost)
+	router.HandleFunc("/api/analysis/{datasetId:[0-9a-fA-F-]{36}}/start", c.Handler.StartAnalysisHandler).Methods(http.MethodPost)
+	router.HandleFunc("/api/analysis/{jobId:[0-9a-fA-F-]{36}}/status", c.Handler.StatusHandler).Methods(http.MethodGet)
+	router.HandleFunc("/api/analysis/{jobId:[0-9a-fA-F-]{36}}/retry", c.Handler.RetryAnalysisHandler).Methods(http.MethodPost)
 	if c.Config.Admin.StatusPatchEnabled {
-		router.HandleFunc("/api/analysis/{jobId}/status", c.Handler.UpdateStatusHandler).Methods(http.MethodPatch)
+		router.HandleFunc("/api/analysis/{jobId:[0-9a-fA-F-]{36}}/status", c.Handler.UpdateStatusHandler).Methods(http.MethodPatch)
 	}
 
 	// serve OpenAPI spec for Swagger UI

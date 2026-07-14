@@ -23,14 +23,14 @@ const (
 )
 
 type PipelineEvent struct {
-	DatasetID    string `json:"datasetId"`
-	JobID        string `json:"jobId"`
-	FailedStep   string `json:"failedStep,omitempty"`
-	ErrorMessage string `json:"errorMessage,omitempty"`
-	Stage        string `json:"stage,omitempty"`
-	Message      string `json:"message,omitempty"`
-	Timestamp    string `json:"timestamp,omitempty"`
-	PublishedAt  string `json:"publishedAt,omitempty"`
+	DatasetID    string          `json:"datasetId"`
+	JobID        string          `json:"jobId"`
+	FailedStep   string          `json:"failedStep,omitempty"`
+	ErrorMessage string          `json:"errorMessage,omitempty"`
+	Stage        string          `json:"stage,omitempty"`
+	Message      string          `json:"message,omitempty"`
+	Timestamp    json.RawMessage `json:"timestamp,omitempty"`
+	PublishedAt  string          `json:"publishedAt,omitempty"`
 }
 
 type PermanentEventError struct{ Message string }

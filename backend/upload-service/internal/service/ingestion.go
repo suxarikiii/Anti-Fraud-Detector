@@ -164,7 +164,11 @@ func validateCSVStream(reader io.Reader, maxRows, maxErrors int) (*validationRes
 
 	issues := make([]ValidationIssue, 0)
 	warnings := make([]ValidationIssue, 0)
-	returnIDs := make(map[string]int)
+	type seenReturn struct {
+		row       int
+		signature string
+	}
+	returnIDs := make(map[string]seenReturn)
 	rows := 0
 	records := 0
 	for {
@@ -199,10 +203,15 @@ func validateCSVStream(reader io.Reader, maxRows, maxErrors int) (*validationRes
 		}
 		returnID := strings.TrimSpace(record[columns["return_id"]])
 		if returnID != "" {
+			signature := strings.Join(record, "\x1f")
 			if first, exists := returnIDs[returnID]; exists {
-				issues = appendIssue(issues, maxErrors, ValidationIssue{Row: rowNumber, Column: "return_id", Code: "DUPLICATE_RETURN_ID", Message: fmt.Sprintf("duplicate return_id %q; first seen on row %d", returnID, first)})
+				if first.signature == signature {
+					warnings = appendIssue(warnings, maxErrors, ValidationIssue{Row: rowNumber, Column: "return_id", Code: "DUPLICATE_ROW", Message: fmt.Sprintf("row %d duplicates row %d and will be removed during normalization", rowNumber, first.row)})
+				} else {
+					issues = appendIssue(issues, maxErrors, ValidationIssue{Row: rowNumber, Column: "return_id", Code: "DUPLICATE_RETURN_ID", Message: fmt.Sprintf("conflicting duplicate return_id %q; first seen on row %d", returnID, first.row)})
+				}
 			} else {
-				returnIDs[returnID] = rowNumber
+				returnIDs[returnID] = seenReturn{row: rowNumber, signature: signature}
 			}
 		}
 		validateFiniteNumber(record, columns, "order_amount", rowNumber, true, &issues, maxErrors)

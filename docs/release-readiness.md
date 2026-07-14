@@ -85,9 +85,9 @@ curl -fsS "http://localhost:8080/api/scoring/datasets/${DATASET_ID}/returns/${RE
 
 ## Known limitations
 
-* Root Compose does not contain the team-owned normalization producer between `dataset.uploaded` and `dataset.normalized`; uploaded UUID E2E depends on that integration.
+* Normalization currently runs inside Upload service and shares canonical artifacts with Relations through a Compose volume; independent scaling would require extracting that consumer into its own service.
 * Relations dataset snapshots are in-memory and must be rebuilt after Relations restart. Scoring results and investigation decisions are durable in PostgreSQL.
 * Dedicated graph storage and production monitoring are not included.
 * External evidence (PR/CI links, second-person checkout, public screenshot, deployed SHA) cannot be generated truthfully from this local working tree and remains an explicit release-lead action.
 
-No `fully integrated` or `production-ready` claim should be made while any item above is pending.
+No `production-ready` claim should be made while any item above is pending.

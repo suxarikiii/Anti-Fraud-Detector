@@ -1,14 +1,17 @@
 # Frontend
 
-React and TypeScript interface for the analyst workflow: upload a refund dataset, monitor processing, investigate suspicious approvals, record a decision, and export results.
+React and TypeScript analyst workspace for dataset-scoped refund fraud investigation.
 
 ## Responsibilities
 
-- validate the selected CSV and show an upload preview;
-- start analysis and poll the pipeline status;
-- filter suspicious approvals by risk, agent, and investigation outcome;
-- show scoring reasons and relationship context;
-- save investigation decisions and download a filtered CSV export.
+- upload a CSV and show its bounded preview and detected mapping;
+- start analysis and poll until a terminal `COMPLETED` or `FAILED` status;
+- filter suspicious approvals and show explicit loading, empty, failed, and unavailable states;
+- show scoring explanations plus dataset-scoped customer, agent, and relation-graph context;
+- preserve the active dataset, job, page, filters, and selected return across refreshes;
+- load and save analyst decisions, including final-outcome confirmation and save errors;
+- export filtered CSV reports;
+- list, reopen, retry, inspect, and archive datasets and their analysis history.
 
 ## Service interactions
 
@@ -22,60 +25,48 @@ flowchart LR
     Gateway --> Scoring[Scoring Service]
 ```
 
-The browser uses relative `/api` URLs. In Docker, the frontend Nginx container forwards them to `gateway:8080`, so backend service addresses never leak into browser configuration.
+The browser uses relative `/api` URLs. Vite proxies development traffic to `http://localhost:8080`; the production Nginx container proxies the same paths to `gateway:8080`.
 
-## Workflow
+## Live flow
 
-```mermaid
-sequenceDiagram
-    actor A as Analyst
-    participant UI as Frontend
-    participant G as Gateway
-    participant U as Upload Service
-    participant S as Scoring Service
+1. Upload a CSV to `POST /api/datasets/upload`.
+2. Load preview metadata, detected mapping, row count, and truncation state.
+3. Start analysis and poll the returned job until `COMPLETED` or `FAILED`.
+4. Load suspicious approvals for the uploaded `datasetId` only.
+5. Open scoring details and dataset-scoped customer, agent, and graph context.
 
-    A->>UI: Select CSV
-    UI->>G: POST /api/datasets/upload
-    G->>U: Upload and validate
-    U-->>UI: datasetId and jobId
-    UI->>G: GET preview
-    A->>UI: Start analysis
-    UI->>G: POST analysis start
-    loop Until completed or failed
-        UI->>G: GET job status
-        G-->>UI: stage and progress
-    end
-    UI->>G: GET suspicious approvals
-    A->>UI: Review and decide
-    UI->>G: PUT investigation decision
-    G->>S: Forward scoring requests
-```
+The release path never substitutes demo approvals, details, analytics, or relation data for an uploaded UUID.
 
 ## Run locally
 
 Requirements: Node.js 20+ and npm.
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Vite serves the UI at `http://localhost:5173`. For a fully connected environment, start the root Docker Compose stack instead and open `http://localhost`.
+The development server is available at `http://localhost:5173`. For the complete environment, start the root Docker Compose stack and open `http://localhost`.
 
 ## Verify
 
 ```bash
-npm test
+npm run test
 npm run build
+npx playwright install chromium firefox
+npm run test:e2e
 ```
 
-## Key configuration
+Vitest covers successful completion, failed analysis, empty results, persisted refresh context, details failures, normalization, pagination, and graph accessibility/truncation.
 
-| File | Purpose |
-| --- | --- |
-| `src/App.tsx` | Application state and API workflow |
-| `src/styles.css` | Product styles and responsive layout |
-| `nginx.conf` | Static hosting and `/api` proxy |
-| `vite.config.ts` | Development and test configuration |
+Playwright exercises the mocked contract flow in Chromium and Firefox at `1366x768`:
 
-The frontend does not store credentials or business data. Persistent state belongs to the backend services.
+```text
+upload -> preview -> completed -> approvals -> details -> analytics/graph -> saved decision -> CSV export
+```
+
+The external release checklist is documented in [`../docs/frontend-e2e-checklist.md`](../docs/frontend-e2e-checklist.md).
+
+## Release verification
+
+The local frontend contract flow is covered in Chromium and Firefox. Final screenshots and external-VM evidence must be captured from the deployed release candidate using the linked checklist.
