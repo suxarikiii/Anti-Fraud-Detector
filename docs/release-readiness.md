@@ -1,22 +1,26 @@
 # Week 6 release readiness
 
-Status: **release candidate implementation complete; deployment identity and team evidence pending**.
+Status: **release candidate implementation complete; final deployed SHA confirmation pending**.
 
 Public deployment target: <http://95.181.213.22/>
 
-Observed on 2026-07-14: the root URL returned `200`, Relations and Upload health returned `UP`, but `/api/scoring/health` returned `200`.
+Observed on 2026-07-14:
+
+- the frontend root returned `200`;
+- Upload Service health returned `UP`;
+- Relations Service health returned `UP`;
+- `/api/scoring/health` returned `200`.
 
 ## Release identity
 
 | Field | Value |
 | --- | --- |
-| Starting repository SHA | `5c14bcd3673916c501bcba26da99ad16ec8923a6` |
-| RC commit | Pending commit/merge of this working tree |
-| RC tag | Pending release lead (`week6-rc.N` recommended) |
-| Deployed SHA | Pending deployment evidence |
-| Identity check | Must satisfy `deployed SHA == documented RC SHA` before sign-off |
+| Release candidate commit | `7ef604af52413a2089e725facb752fe7cefafefa` |
+| RC tag | Pending release lead (`week6-rc.1` recommended) |
+| Deployed SHA | Pending confirmation from the VM |
+| Identity check | The deployed SHA must equal the documented release candidate commit before final sign-off |
 
-The starting SHA is not claimed as the deployed RC: the Week 6 changes are currently uncommitted. Fill the three pending fields only from Git/CI evidence after merge and deployment.
+The Week 6 release candidate has been merged into `main`. The remaining release-lead action is to capture `git rev-parse HEAD` from the deployed environment and confirm that it matches `7ef604af52413a2089e725facb752fe7cefafefa`.
 
 ## Reproducible checks
 
