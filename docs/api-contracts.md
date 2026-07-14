@@ -1,4 +1,4 @@
-<h1 align="center">API Contracts</h1>
+# API contracts
 
 All frontend calls should go through the gateway using `/api/...`.
 
@@ -87,6 +87,7 @@ The normal release flow is event-driven. Manual status PATCH is absent unless th
 | `GET` | `/api/relations/returns/{returnId}/features` | Demo relation features. |
 | `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}` | Dataset-scoped return relation context. |
 | `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}/features` | Dataset-scoped relation features. |
+| `GET` | `/api/relations/datasets/{datasetId}/scoring-inputs` | Internal atomic records + feature snapshot for scoring. |
 | `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}/related?limit=8` | Related returns with relation reason and strength. |
 | `GET` | `/api/relations/datasets/{datasetId}/returns/{returnId}/graph?limit=24` | Bounded graph projection for investigation UI. |
 | `GET` | `/api/relations/datasets/{datasetId}/customers/{customerId}/history` | Dataset-scoped customer return history. |
@@ -203,11 +204,14 @@ Rebuild response:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/scoring/health` | Scoring service health. |
-| `GET` | `/api/scoring/datasets/{datasetId}/suspicious-approvals` | Ranked approvals with score >= `31`. |
+| `GET` | `/api/scoring/datasets/{datasetId}/suspicious-approvals?risk=&agent=&outcome=` | Ranked approvals with score >= `31`, optional filters. |
 | `GET` | `/api/scoring/datasets/{datasetId}/returns/{returnId}/risk` | Risk score and reasons. |
 | `GET` | `/api/scoring/datasets/{datasetId}/returns/{returnId}/details` | Risk plus order/return/feature context. |
 | `GET` | `/api/scoring/datasets/{datasetId}/agents/{agentId}/risk-summary` | Agent-level risk summary. |
 | `POST` | `/api/scoring/datasets/{datasetId}/recalculate` | Recalculate dataset risk. |
+| `GET` | `/api/scoring/datasets/{datasetId}/returns/{returnId}/decision` | Read durable analyst decision. |
+| `PUT` | `/api/scoring/datasets/{datasetId}/returns/{returnId}/decision` | Create/update action, outcome, note and analyst ID. |
+| `GET` | `/api/scoring/datasets/{datasetId}/export.csv?risk=&agent=&outcome=` | UTF-8 CSV export of latest scoring and analyst outcome. |
 
 Compatibility routes:
 
@@ -233,6 +237,8 @@ Risk response:
     { "type": "NO_EVIDENCE", "scoreImpact": 25 },
     { "type": "HIGH_VALUE_REFUND", "scoreImpact": 20 }
   ],
+  "featureSource": "RELATIONS_SERVICE",
+  "calculationVersion": 3,
   "calculatedAt": "2026-06-01T10:15:00Z"
 }
 ```
@@ -256,10 +262,25 @@ Details response adds business facts and relation-style features:
     "customerAgentPairCount": 5,
     "clusterSize": 5,
     "strongestRelationType": "REPEATED_AGENT_CUSTOMER_PAIR",
-    "featureSource": "CSV_DERIVED_FALLBACK"
-  }
+    "featureSource": "RELATIONS_SERVICE"
+  },
+  "featureSource": "RELATIONS_SERVICE",
+  "calculationVersion": 3
 }
 ```
+
+Decision request:
+
+```json
+{
+  "action": "ESCALATE",
+  "outcome": "NEEDS_MORE_INFO",
+  "note": "Проверить подтверждающий чек",
+  "analystId": "analyst-17"
+}
+```
+
+Allowed actions are `REVIEW`, `ESCALATE`, `APPROVE_REFUND`, `REJECT_REFUND`, and `FREEZE_ACCOUNT`. Outcomes are `OPEN`, `NEEDS_MORE_INFO`, `CONFIRMED_FRAUD`, `FALSE_POSITIVE`, and `RESOLVED`. Terminal outcomes cannot transition back to an open state.
 
 Error response:
 
@@ -273,8 +294,9 @@ Error response:
 }
 ```
 
-## Current Limits
+## Error and source behavior
 
-* Literal unknown dataset IDs return `404`.
-* Uploaded UUID dataset IDs currently use CSV-derived scoring fallback.
-* Relation features are represented in scoring responses, but persisted relation-feature handoff is still follow-up work.
+* A Relations `404` becomes a scoring `404`; unavailable Relations or missing/mismatched feature data becomes a controlled `503` with an `errorCode`.
+* Unknown UUIDs never receive demo data.
+* Production feature provenance is `RELATIONS_SERVICE`; `DEMO_CSV` exists only when explicitly enabled for tests/demo.
+* Invalid enum values and invalid outcome transitions return JSON `400`.

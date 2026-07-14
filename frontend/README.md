@@ -1,110 +1,81 @@
-<h1 align="center">Frontend Dashboard</h1>
+# Frontend
 
-The frontend dashboard supports the analyst workflow for suspicious refund approvals in e-commerce support.
+React and TypeScript interface for the analyst workflow: upload a refund dataset, monitor processing, investigate suspicious approvals, record a decision, and export results.
 
-<h2 align="center">Running the Frontend</h2>
+## Responsibilities
 
-Prerequisites:
+- validate the selected CSV and show an upload preview;
+- start analysis and poll the pipeline status;
+- filter suspicious approvals by risk, agent, and investigation outcome;
+- show scoring reasons and relationship context;
+- save investigation decisions and download a filtered CSV export.
 
-* Node.js;
-* npm;
-* backend gateway or backend services available for `/api` requests.
+## Service interactions
 
-Install dependencies:
-
-```bash
-cd frontend
-npm install
+```mermaid
+flowchart LR
+    Analyst[Analyst] --> UI[React Frontend]
+    UI -->|/api/*| Nginx[Frontend Nginx]
+    Nginx --> Gateway[API Gateway]
+    Gateway --> Upload[Upload Service]
+    Gateway --> Relations[Relations Service]
+    Gateway --> Scoring[Scoring Service]
 ```
 
-Run the development server:
+The browser uses relative `/api` URLs. In Docker, the frontend Nginx container forwards them to `gateway:8080`, so backend service addresses never leak into browser configuration.
+
+## Workflow
+
+```mermaid
+sequenceDiagram
+    actor A as Analyst
+    participant UI as Frontend
+    participant G as Gateway
+    participant U as Upload Service
+    participant S as Scoring Service
+
+    A->>UI: Select CSV
+    UI->>G: POST /api/datasets/upload
+    G->>U: Upload and validate
+    U-->>UI: datasetId and jobId
+    UI->>G: GET preview
+    A->>UI: Start analysis
+    UI->>G: POST analysis start
+    loop Until completed or failed
+        UI->>G: GET job status
+        G-->>UI: stage and progress
+    end
+    UI->>G: GET suspicious approvals
+    A->>UI: Review and decide
+    UI->>G: PUT investigation decision
+    G->>S: Forward scoring requests
+```
+
+## Run locally
+
+Requirements: Node.js 20+ and npm.
 
 ```bash
-cd frontend
+npm install
 npm run dev
 ```
 
-Default development URL:
+Vite serves the UI at `http://localhost:5173`. For a fully connected environment, start the root Docker Compose stack instead and open `http://localhost`.
 
-```text
-http://localhost:5173
-```
-
-Build production assets:
+## Verify
 
 ```bash
-cd frontend
+npm test
 npm run build
 ```
 
-Preview the production build locally:
+## Key configuration
 
-```bash
-cd frontend
-npm run preview
-```
+| File | Purpose |
+| --- | --- |
+| `src/App.tsx` | Application state and API workflow |
+| `src/styles.css` | Product styles and responsive layout |
+| `nginx.conf` | Static hosting and `/api` proxy |
+| `vite.config.ts` | Development and test configuration |
 
-When the frontend is run in the Docker production container, Nginx serves the built files and proxies `/api` requests to the backend gateway. In local Vite development, make sure the backend API is reachable from the browser or use the full Docker Compose environment.
-
-<h2 align="center">Pages</h2>
-
-```text
-Upload Dataset Page
-Dataset Preview / Mapping Page
-Analysis Status Page
-Suspicious Refund Approvals Page
-Refund Approval Details Page
-Support Agent Summary Page
-Customer Return History Page
-```
-
-<h2 align="center">Main Suspicious Approvals Table</h2>
-
-Columns:
-
-```text
-returnId
-orderId
-customerId
-supportAgentId
-refundAmount
-decision
-riskScore
-riskLevel
-topReason
-```
-
-<h2 align="center">Refund Approval Details Page</h2>
-
-The details page should show:
-
-```text
-risk score
-risk level
-explanations
-order details
-return request details
-customer return history
-support agent approval behavior
-related refund approvals
-```
-
-<h2 align="center">Main User Flow</h2>
-
-1. Upload an e-commerce refund dataset.
-2. Review dataset preview.
-3. Confirm or adjust column mapping.
-4. Start analysis.
-5. Watch analysis status.
-6. Open suspicious refund approvals.
-7. Investigate one refund approval.
-8. Review customer return history, support agent approval behavior, and related refund approvals.
-
-<h2 align="center">Demo and Screenshots</h2>
-
-The compact demo flow and screenshots are available in:
-
-```text
-../docs/demo-flow.md
-../docs/assets/screenshots/
-```
+The frontend does not store credentials or business data. Persistent state belongs to the backend services.

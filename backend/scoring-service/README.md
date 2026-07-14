@@ -1,255 +1,96 @@
-<h1 align="center">Scoring Service</h1>
+# Scoring Service
 
-The Scoring Service calculates refund approval risk scores for suspicious refund approvals in e-commerce support workflows.
+Kotlin and Spring Boot service that calculates explainable refund-approval risk, persists results, and supports the investigator decision and export workflow.
 
-It is responsible for:
+## Responsibilities
 
-* `RefundApprovalRiskScore`;
-* `SuspiciousRefundApproval`;
-* risk levels;
-* scoring rules;
-* explanations;
-* suspicious refund approvals API;
-* consuming `refund.relations.built`;
-* publishing `refund.scoring.completed`.
+- consume `refund.relations.built` events;
+- fetch the matching versioned feature snapshot from Relations Service;
+- calculate deterministic score, risk level, summary, and reason codes;
+- persist calculations and investigation decisions in PostgreSQL;
+- expose filtered results, details, agent summaries, decisions, and CSV export;
+- publish `refund.scoring.completed` or `pipeline.failed`.
 
-<h2 align="center">Service Flow</h2>
+## Service interactions
 
 ```mermaid
-flowchart TD
-    A[Relations Service] -->|publish refund.relations.built| B[RabbitMQ pipeline.exchange]
-    B -->|consume refund.relations.built| C[Scoring Service]
-
-    C --> D[Read CSV-derived fallback features]
-    D --> E[Rule-based refund approval scoring]
-    E --> F[Risk score + risk level + explanations]
-
-    C -->|publish refund.scoring.completed| B
-    C -->|on error publish pipeline.failed| B
-
-    H[Frontend] -->|REST via Nginx| I[Scoring API]
-    I --> C
+flowchart LR
+    MQ[(RabbitMQ)] -->|refund.relations.built| Scoring[Scoring Service]
+    Scoring -->|refund.scoring.completed or pipeline.failed| MQ
+    Scoring -->|GET scoring-inputs| Relations[Relations Service]
+    Scoring --> DB[(PostgreSQL)]
+    Gateway[API Gateway] -->|HTTP :8083| Scoring
 ```
 
-<h2 align="center">Running the Scoring Service</h2>
+## Workflow
 
-Prerequisites:
+```mermaid
+sequenceDiagram
+    participant Q as RabbitMQ
+    participant S as Scoring Service
+    participant R as Relations Service
+    participant D as PostgreSQL
 
-* JDK 17;
-* RabbitMQ for pipeline event consumption;
-* free local port `8083` when running together with the Go upload service.
-
-If RabbitMQ is not already running, start the shared local broker from the upload-service compose file:
-
-```bash
-cd backend/upload-service
-docker compose up -d rabbitmq
+    Q->>S: refund.relations.built
+    S->>R: GET dataset scoring-inputs
+    R-->>S: Records and versioned features
+    S->>S: Calculate scores and reason codes
+    S->>D: Replace dataset calculation atomically
+    S->>Q: refund.scoring.completed
+    Note over S,D: API reads and decisions use persisted results
 ```
 
-Run tests:
+If Relations Service is unavailable, its contract is invalid, or persistence fails, the service publishes `pipeline.failed` with `stage=SCORING` and does not report false completion.
+
+## Main API
+
+Base path: `/api/scoring`.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /health` | Service health |
+| `GET /datasets/{datasetId}/suspicious-approvals` | Filtered result list |
+| `GET /datasets/{datasetId}/returns/{returnId}/risk` | Score and reasons |
+| `GET /datasets/{datasetId}/returns/{returnId}/details` | Investigation detail |
+| `GET /datasets/{datasetId}/agents/{agentId}/risk-summary` | Agent aggregates |
+| `POST /datasets/{datasetId}/recalculate` | Recalculate from Relations data |
+| `GET, PUT /datasets/{datasetId}/returns/{returnId}/decision` | Read or save a decision |
+| `GET /datasets/{datasetId}/export.csv` | Filtered CSV export |
+
+List and export filters are `risk`, `agent`, and `outcome`.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SERVER_PORT` | `8083` | HTTP listener |
+| `SCORING_DB_URL` | local `upload_db` | PostgreSQL JDBC URL |
+| `SCORING_DB_USER`, `SCORING_DB_PASSWORD` | `postgres` | Database credentials |
+| `SPRING_RABBITMQ_*` | local RabbitMQ | Broker connection |
+| `RELATIONS_BASE_URL` | `http://localhost:8082` | Relations Service address |
+| `SCORING_DEMO_ENABLED` | `false` | Explicit demo-only provider |
+
+Do not enable demo mode for production dataset IDs.
+
+## Run and verify
+
+Requirements for local execution: Java 17 and reachable PostgreSQL, RabbitMQ, and Relations Service.
 
 ```bash
-cd backend/scoring-service
-./gradlew test
-```
-
-Run full local build:
-
-```bash
-cd backend/scoring-service
-./gradlew clean build
-```
-
-Build and run with the root compose stack:
-
-```bash
-docker compose build scoring-service
-docker compose up -d scoring-service
-```
-
-Run locally on port `8083`:
-
-```bash
-cd backend/scoring-service
-SERVER_PORT=8083 \
-SPRING_RABBITMQ_HOST=localhost \
-SPRING_RABBITMQ_PORT=5672 \
-SPRING_RABBITMQ_USERNAME=guest \
-SPRING_RABBITMQ_PASSWORD=guest \
 ./gradlew bootRun
 ```
 
-If the service is started without `SERVER_PORT`, it uses the port configured in `src/main/resources/application.yml`.
-
-Health check:
+Tests and production build:
 
 ```bash
-curl http://localhost:8083/api/scoring/health
+./gradlew clean test build
 ```
 
-Load demo suspicious approvals:
+Connected health check:
 
 ```bash
-curl http://localhost:8083/api/scoring/datasets/demo/suspicious-approvals
+docker compose up -d postgres rabbitmq relations-service scoring-service gateway
+curl -fsS http://localhost:8080/api/scoring/health
 ```
 
-Load demo refund approval details:
-
-```bash
-curl http://localhost:8083/api/scoring/datasets/demo/returns/return_3041/details
-```
-
-Load demo support agent summary:
-
-```bash
-curl http://localhost:8083/api/scoring/datasets/demo/agents/agent_999/risk-summary
-```
-
-Gateway smoke commands, when the root compose stack is running:
-
-```bash
-curl http://localhost:8080/api/scoring/health
-curl http://localhost:8080/api/scoring/datasets/demo/suspicious-approvals
-curl http://localhost:8080/api/scoring/datasets/demo/returns/return_3041/details
-curl http://localhost:8080/api/scoring/datasets/demo/agents/agent_999/risk-summary
-```
-
-The scoring service consumes `refund.relations.built` from RabbitMQ pipeline exchange `pipeline.exchange` and publishes `refund.scoring.completed` or `pipeline.failed`.
-
-Relation feature integration is event-ready for the MVP. Until relation features
-are persisted in scoring, the service derives these feature names from the CSV:
-`customerReturnCount`, `agentApprovalRate`, `customerAgentPairCount`, `clusterSize`,
-`refundAmountRatio`, and `strongestRelationType`. Responses mark this as
-`featureSource: "CSV_DERIVED_FALLBACK"`.
-
-<h2 align="center">API Endpoints</h2>
-
-```text
-GET /api/scoring/health
-GET /api/scoring/datasets/{datasetId}/suspicious-approvals
-GET /api/scoring/datasets/{datasetId}/returns/{returnId}/risk
-GET /api/scoring/datasets/{datasetId}/returns/{returnId}/details
-GET /api/scoring/datasets/{datasetId}/agents/{agentId}/risk-summary
-GET /api/scoring/returns/{returnId}/risk
-GET /api/scoring/agents/{agentId}/risk-summary
-POST /api/scoring/datasets/{datasetId}/recalculate
-```
-
-The dataset-scoped endpoints are the stable frontend contract. The older
-`/api/scoring/returns/{returnId}/risk` and `/api/scoring/agents/{agentId}/risk-summary`
-routes are kept for demo compatibility and use the `demo` dataset internally.
-
-Unknown literal dataset IDs and return IDs return JSON `404` responses. Uploaded
-UUID dataset IDs currently use the same CSV-derived fallback data until normalized
-dataset storage is connected to scoring.
-
-<h2 align="center">Risk Factors</h2>
-
-```text
-NO_EVIDENCE
-HIGH_VALUE_REFUND
-FULL_AMOUNT_REFUND
-FAST_APPROVAL
-MANUAL_OVERRIDE
-AGENT_HIGH_APPROVAL_RATE
-CUSTOMER_FREQUENT_RETURNS
-REPEATED_AGENT_CUSTOMER_PAIR
-SUSPICIOUS_CLUSTER
-```
-
-<h2 align="center">Rule-Based Scoring Draft</h2>
-
-| Rule | Condition | Score Impact |
-| --- | --- | --- |
-| NO_EVIDENCE | Refund was approved and no evidence was provided | +25 |
-| HIGH_VALUE_REFUND | Refund amount is at least `500.00` | +20 |
-| FULL_AMOUNT_REFUND | Refund amount is at least `95%` of order amount | +15 |
-| FAST_APPROVAL | Refund was approved in `5` minutes or less | +15 |
-| MANUAL_OVERRIDE | Manual override was used | +20 |
-| AGENT_HIGH_APPROVAL_RATE | Agent has at least `5` decisions and approval rate is above `85%` | +30 |
-| CUSTOMER_FREQUENT_RETURNS | Customer has at least `5` return requests in the dataset | +20 |
-| REPEATED_AGENT_CUSTOMER_PAIR | Same agent handled at least `3` return requests for the same customer | +25 |
-| SUSPICIOUS_CLUSTER | CSV-derived or relation-derived cluster size is at least `5` | +25 |
-
-Rules are evaluated in the table order so `topReason` and the `reasons` array are
-deterministic for the same input. Scores above `100` are capped at `100`.
-
-<h2 align="center">Risk Levels</h2>
-
-```text
-0-30 LOW
-31-60 MEDIUM
-61-80 HIGH
-81-100 CRITICAL
-```
-
-<h2 align="center">Events</h2>
-
-Consumes:
-
-```text
-refund.relations.built
-```
-
-Publishes:
-
-```text
-refund.scoring.completed
-```
-
-<h2 align="center">Example Suspicious Refund Approval Response</h2>
-
-```json
-{
-  "datasetId": "demo",
-  "returnId": "return_3041",
-  "orderId": "order_1041",
-  "customerId": "customer_999",
-  "supportAgentId": "agent_999",
-  "refundAmount": 1019.25,
-  "orderAmount": 1168.27,
-  "decision": "APPROVED",
-  "riskScore": 100,
-  "riskLevel": "CRITICAL",
-  "topReason": "Refund was approved without attached evidence, so the analyst cannot verify the customer's claim from this record.",
-  "reasons": [
-    {
-      "type": "NO_EVIDENCE",
-      "message": "Refund was approved without attached evidence, so the analyst cannot verify the customer's claim from this record.",
-      "scoreImpact": 25
-    },
-    {
-      "type": "HIGH_VALUE_REFUND",
-      "message": "Refund amount is $1019.25. This is above the $500.00 high-value threshold and should be checked before payout.",
-      "scoreImpact": 20
-    },
-    {
-      "type": "FAST_APPROVAL",
-      "message": "Decision was approved in 4 minutes. This is at or below the 5-minute review threshold and may indicate a skipped check.",
-      "scoreImpact": 15
-    },
-    {
-      "type": "AGENT_HIGH_APPROVAL_RATE",
-      "message": "This support agent approved 100% of 5 refund decisions in the dataset; compare this with team norms before accepting the case.",
-      "scoreImpact": 30
-    }
-  ],
-  "calculatedAt": "2026-06-01T10:15:00Z"
-}
-```
-
-<h2 align="center">Demo Return IDs</h2>
-
-| returnId | Expected Level | Main Reasons | Explanation |
-| --- | --- | --- | --- |
-| `return_3001` | LOW | `FULL_AMOUNT_REFUND` | Low-risk demo case. |
-| `return_303075` | MEDIUM | `NO_EVIDENCE`, `HIGH_VALUE_REFUND` | High-value refund approved without evidence. |
-| `return_3006` | HIGH | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `AGENT_HIGH_APPROVAL_RATE` | High-risk case with no evidence, high refund amount, and high agent approval rate. |
-| `return_3041` | CRITICAL | `NO_EVIDENCE`, `HIGH_VALUE_REFUND`, `FAST_APPROVAL`, `MANUAL_OVERRIDE`, relation pattern rules | Repeated customer-agent pattern with manual overrides and high-value fast approvals. |
-
-<h2 align="center">Known Limitations</h2>
-
-* Scores are calculated from the current CSV-backed dataset and are not persisted.
-* Uploaded UUID dataset IDs use CSV-derived fallback data until normalized dataset storage is connected to scoring.
-* Relation-style fields are mirrored from CSV-derived features. Full relation-feature storage and handoff from Relations Service remains a follow-up integration task.
-* Gateway smoke commands require the full root compose stack.
+Scoring rules and thresholds are documented in [`../../docs/scoring-rules.md`](../../docs/scoring-rules.md).
